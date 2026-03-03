@@ -55,7 +55,7 @@ export default function TopNavbar() {
 
     return (
         <>
-            <nav className="hidden md:flex bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 fixed top-0 w-full z-40 h-16 shadow-sm">
+            <nav className="flex bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 fixed top-0 w-full z-40 h-16 shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
                     <div className="flex justify-between items-center h-full">
 
@@ -70,7 +70,7 @@ export default function TopNavbar() {
                         </div>
 
                         {/* Nav Links */}
-                        <div className="flex items-center space-x-8">
+                        <div className="hidden md:flex items-center space-x-8">
                             {navItems.map((item) => {
                                 const isActive = location.pathname === item.path;
                                 return (
