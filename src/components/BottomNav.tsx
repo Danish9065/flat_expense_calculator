@@ -1,10 +1,10 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, PieChart, Users, Settings } from 'lucide-react';
+import { Home, PieChart, Users, Settings, Shield } from 'lucide-react';
 
 export default function BottomNav() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const location = useLocation();
 
     if (!user) return null;
@@ -15,6 +15,10 @@ export default function BottomNav() {
         { label: 'Group', path: '/group', icon: Users },
         { label: 'Settings', path: '/settings', icon: Settings },
     ];
+
+    if (role === 'admin') {
+        navItems.push({ label: 'Admin', path: '/admin', icon: Shield });
+    }
 
     return (
         <div className="fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 md:hidden z-40 pb-safe">
