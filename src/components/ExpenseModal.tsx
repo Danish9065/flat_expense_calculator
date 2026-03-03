@@ -13,11 +13,12 @@ interface ExpenseModalProps {
     groupId: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     editingExpense?: any;
+    onSuccess?: () => void;
 }
 
 export const CATEGORIES = ['General', 'Home', 'Kitchen', 'Groceries', 'Utilities', 'Rent'];
 
-export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense }: ExpenseModalProps) {
+export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense, onSuccess }: ExpenseModalProps) {
     const { user } = useAuth();
     const { members } = useGroup();
     const { success, error: showError } = useToast();
@@ -113,6 +114,9 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense 
             }
 
             onClose();
+            if (onSuccess) {
+                onSuccess();
+            }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Failed to save expense');

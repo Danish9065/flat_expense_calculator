@@ -40,33 +40,33 @@ export default function Dashboard() {
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     const name = user?.full_name?.split(' ')[0] || 'Member';
 
-    // Realtime & Fetch Data setup
-    useEffect(() => {
+    const fetchInitialData = async () => {
         if (!groupId || !user) {
             setLoading(false);
             return;
         }
 
-        const fetchInitialData = async () => {
-            setLoading(true);
-            try {
-                // Fetch expenses
-                const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name)`);
+        setLoading(true);
+        try {
+            // Fetch expenses
+            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id)`);
 
-                if (expData) {
-                    setExpenses(expData);
-                }
-
-                // Fetch Balances
-                const bals = await SettlementService.calculateBalance(groupId, user.id);
-                setBalances(bals);
-            } catch (err) {
-                console.error('Failed to load dashboard data', err);
-            } finally {
-                setLoading(false);
+            if (expData) {
+                setExpenses(expData);
             }
-        };
 
+            // Fetch Balances
+            const bals = await SettlementService.calculateBalance(groupId, user.id);
+            setBalances(bals);
+        } catch (err) {
+            console.error('Failed to load dashboard data', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Realtime & Fetch Data setup
+    useEffect(() => {
         fetchInitialData();
     }, [groupId, user]);
 
@@ -94,6 +94,7 @@ export default function Dashboard() {
 
             await dbDelete('expenses', `id=eq.${expenseToDelete}`);
             success('Expense deleted');
+            await fetchInitialData();
         } catch {
             showError('Failed to delete expense');
         } finally {
@@ -202,6 +203,7 @@ export default function Dashboard() {
                             key={expense.id}
                             expense={expense}
                             memberName={getMemberName(expense.added_by)}
+                            splitNames={expense.expense_splits?.map((s: any) => getMemberName(s.user_id)).join(', ')}
                             onEdit={() => { setEditingExpense(expense); setModalOpen(true); }}
                             onDelete={() => setExpenseToDelete(expense.id)}
                             isOwner={user?.id === expense.added_by}
@@ -227,6 +229,7 @@ export default function Dashboard() {
                     onClose={() => setModalOpen(false)}
                     groupId={groupId}
                     editingExpense={editingExpense}
+                    onSuccess={fetchInitialData}
                 />
             )}
 
@@ -244,9 +247,11 @@ export default function Dashboard() {
 
 // Internal component for Expense Item
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ExpenseCard({ expense, memberName, onEdit, onDelete, isOwner }: any) {
+function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner }: any) {
     const parsedDate = expense.created_at ? new Date(expense.created_at) : new Date();
     const [expanded, setExpanded] = useState(false);
+
+    const paidText = splitNames ? `Paid by ${memberName} for ${splitNames}` : memberName;
 
     return (
         <div className="relative overflow-hidden rounded-2xl bg-card dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700 transition-all hover:shadow-md">
@@ -265,10 +270,11 @@ function ExpenseCard({ expense, memberName, onEdit, onDelete, isOwner }: any) {
                                 </div>
                             );
                         })()}
-                        <div className="truncate pr-2">
+                        <div className="pr-2">
                             <h3 className="font-bold text-gray-900 dark:text-white truncate">{expense.item_name}</h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                                {memberName} • {format(parsedDate, 'MMM d, yyyy • h:mm a')}
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 whitespace-normal leading-relaxed" title={`${paidText} • ${format(parsedDate, 'MMM d, yyyy • h:mm a')}`}>
+                                {paidText} <br className="hidden sm:block" />
+                                <span className="opacity-75">• {format(parsedDate, 'MMM d, yyyy • h:mm a')}</span>
                             </p>
                         </div>
                     </div>
