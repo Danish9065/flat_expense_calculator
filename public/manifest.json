@@ -1,0 +1,9 @@
+{
+  "name": "SplitMate",
+  "short_name": "SplitMate",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F7FF",
+  "theme_color": "#6C63FF",
+  "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+}
