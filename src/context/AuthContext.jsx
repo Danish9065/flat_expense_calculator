@@ -51,6 +51,7 @@ export function AuthProvider({ children }) {
     if (!res.ok) throw new Error(data.message || 'Invalid email or password');
 
     // Set SDK token immediately after login
+    setAuthToken(data.accessToken);
 
     let userRole = 'member';
     let fullName = 'Member';
@@ -65,7 +66,6 @@ export function AuthProvider({ children }) {
       console.log('Role fetch failed:', e);
     }
 
-    setAuthToken(data.accessToken);
     setUser(data.user);
     setRole(userRole);
     localStorage.setItem('splitmate-user', JSON.stringify({
@@ -86,7 +86,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ user, role, loading, signIn, signOut }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }

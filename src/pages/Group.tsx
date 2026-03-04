@@ -260,7 +260,7 @@ export default function GroupPage() {
                                 const isMemberAdmin = mUser ? (mUser as any).role === 'admin' : false;
 
                                 return (
-                                    <div key={member.id} className="p-4 flex items-center justify-between">
+                                    <div key={member.user_id} className="p-4 flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
                                             <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg overflow-hidden shrink-0">
                                                 {mUser?.avatar_url ? (

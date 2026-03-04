@@ -88,7 +88,8 @@ export default function Dashboard() {
                 if (fileName) {
                     await insforge.storage
                         .from('receipts')
-                        .remove(fileName);
+                        // @ts-ignore
+                        .remove([fileName] as unknown as string);
                 }
             }
 

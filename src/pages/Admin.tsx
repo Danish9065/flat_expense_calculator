@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import insforge from '../lib/db';
-import { dbQuery, dbInsert, dbUpdate, dbDelete, dbRpc } from '../lib/db';
+import { dbQuery, dbInsert, dbUpdate, dbDelete } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useGroup } from '../context/GroupContext';
