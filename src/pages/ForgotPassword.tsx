@@ -16,7 +16,7 @@ export default function ForgotPassword() {
         setLoading(true);
 
         try {
-            const { data, error } = await insforge.auth.sendResetPasswordEmail({
+            const { error } = await insforge.auth.sendResetPasswordEmail({
                 email,
             });
 

@@ -37,7 +37,7 @@ export const SettlementService = {
         // 2. UPDATE expense_splits SET is_settled=true, settled_at=now()
         // Need to fetch target expenses first to do this via postgREST
         let queryStr = `added_by=eq.${targetUserId}&group_id=eq.${groupId}&select=id`;
-        if (categoryFilter && categoryFilter !== 'All') queryStr += `&category=eq.${categoryFilter.toLowerCase()}`;
+        if (categoryFilter && categoryFilter !== 'All') queryStr += `&category=eq.${categoryFilter}`;
         const targetExpenses = await dbQuery('expenses', queryStr);
 
         const expenseIds = (targetExpenses || []).map((e: any) => e.id);
@@ -57,7 +57,7 @@ export const SettlementService = {
     async calculateGroupSettlements(groupId: string, members: any[], categoryFilter?: string) {
         // Fetch all unsettled splits for this group
         let q = `is_settled=eq.false&expenses.group_id=eq.${groupId}&select=amount_owed,user_id,expenses!inner(added_by,group_id,category)`;
-        if (categoryFilter && categoryFilter !== 'All') q += `&expenses.category=eq.${categoryFilter.toLowerCase()}`;
+        if (categoryFilter && categoryFilter !== 'All') q += `&expenses.category=eq.${categoryFilter}`;
         const splits = await dbQuery('expense_splits', q);
 
         // 1. Calculate net balances

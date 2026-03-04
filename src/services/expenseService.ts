@@ -33,13 +33,17 @@ export const ExpenseService = {
             splitMemberIds = members.map((m: any) => m.user_id);
         }
 
-        const splitAmount = Math.round((expenseData.amount / splitMemberIds.length) * 100) / 100;
+        const totalAmount = expenseData.amount;
+        const baseSplit = Math.floor((totalAmount / splitMemberIds.length) * 100) / 100;
+        const remainder = Math.round((totalAmount - (baseSplit * splitMemberIds.length)) * 100) / 100;
 
-        for (const userId of splitMemberIds) {
+        for (let i = 0; i < splitMemberIds.length; i++) {
+            const userId = splitMemberIds[i];
+            const amount_owed = i === 0 ? Math.round((baseSplit + remainder) * 100) / 100 : baseSplit;
             await dbInsert('expense_splits', {
                 expense_id: expense.id,
                 user_id: userId,
-                amount_owed: splitAmount
+                amount_owed
             });
         }
         return expense;
@@ -66,13 +70,17 @@ export const ExpenseService = {
                 splitMemberIds = members.map((m: any) => m.user_id);
             }
 
-            const splitAmount = Math.round(((updates.amount !== undefined ? updates.amount : expense.amount) / splitMemberIds.length) * 100) / 100;
+            const totalAmount = updates.amount !== undefined ? updates.amount : expense.amount;
+            const baseSplit = Math.floor((totalAmount / splitMemberIds.length) * 100) / 100;
+            const remainder = Math.round((totalAmount - (baseSplit * splitMemberIds.length)) * 100) / 100;
 
-            for (const userId of splitMemberIds) {
+            for (let i = 0; i < splitMemberIds.length; i++) {
+                const userId = splitMemberIds[i];
+                const amount_owed = i === 0 ? Math.round((baseSplit + remainder) * 100) / 100 : baseSplit;
                 await dbInsert('expense_splits', {
                     expense_id: expense.id,
                     user_id: userId,
-                    amount_owed: splitAmount
+                    amount_owed
                 });
             }
         }

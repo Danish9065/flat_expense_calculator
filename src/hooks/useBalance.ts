@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react';
-// @ts-ignore
-import insforge from '../lib/db';
 import { dbQuery } from '../lib/db';
 
-export function useBalance(groupId: string | null, userId: string | null) {
+export function useBalance(groupId: string | null, userId: string | null, category: string = 'All') {
     const [balance, setBalance] = useState(0);
-    const [debts, setDebts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     const calculateBalance = async () => {
@@ -13,11 +10,15 @@ export function useBalance(groupId: string | null, userId: string | null) {
 
         try {
             setLoading(true);
-            const paid = await dbQuery('expenses', `group_id=eq.${groupId}&added_by=eq.${userId}&select=amount`);
+            let paidQuery = `group_id=eq.${groupId}&added_by=eq.${userId}&select=amount`;
+            if (category !== 'All') paidQuery += `&category=eq.${category}`;
+            const paid = await dbQuery('expenses', paidQuery);
 
             const totalPaid = paid?.reduce((sum: number, e: any) => sum + parseFloat(e.amount), 0) ?? 0;
 
-            const owed = await dbQuery('expense_splits', `user_id=eq.${userId}&is_settled=eq.false&select=amount_owed`);
+            let owedQuery = `user_id=eq.${userId}&is_settled=eq.false&select=amount_owed,expenses!inner(category)`;
+            if (category !== 'All') owedQuery += `&expenses.category=eq.${category}`;
+            const owed = await dbQuery('expense_splits', owedQuery);
 
             const totalOwed = owed?.reduce((sum: number, s: any) => sum + parseFloat(s.amount_owed), 0) ?? 0;
 
@@ -30,7 +31,7 @@ export function useBalance(groupId: string | null, userId: string | null) {
     useEffect(() => {
         calculateBalance();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [groupId, userId]);
+    }, [groupId, userId, category]);
 
-    return { balance, debts, loading, recalculate: calculateBalance };
+    return { balance, loading, recalculate: calculateBalance };
 }
