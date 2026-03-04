@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { dbQuery, setAuthToken } from '../lib/db';
+import insforge, { dbQuery, setAuthToken } from '../lib/db';
 
 const AuthContext = createContext(null);
 
@@ -8,28 +8,83 @@ export function AuthProvider({ children }) {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Global log out listener for interceptors
+  useEffect(() => {
+    const handleLogout = () => {
+      localStorage.removeItem('splitmate-user');
+      if ('caches' in window) {
+        caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
+      }
+      setUser(null);
+      setRole(null);
+    };
+    window.addEventListener('auth:logout', handleLogout);
+    return () => window.removeEventListener('auth:logout', handleLogout);
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       try {
+        let currentToken = null;
+        let userDataToUse = null;
+
         const saved = localStorage.getItem('splitmate-user');
         if (saved) {
           const parsed = JSON.parse(saved);
+          currentToken = parsed.token;
+          userDataToUse = parsed;
+        }
+
+        // Always try to verify/refresh the session on load
+        try {
+          const { data: sessionData } = await insforge.auth.getCurrentSession();
+          if (sessionData?.session?.accessToken) {
+            currentToken = sessionData.session.accessToken;
+            if (userDataToUse) {
+              userDataToUse.token = currentToken;
+            } else {
+              // Edge case: valid cookie session but local storage missing
+              userDataToUse = {
+                user: sessionData.session.user,
+                role: 'member',
+                token: currentToken
+              };
+            }
+            // Update local storage preemptively
+            localStorage.setItem('splitmate-user', JSON.stringify(userDataToUse));
+          }
+        } catch (e) {
+          console.error("Session refresh failed:", e);
+        }
+
+        if (userDataToUse && currentToken) {
           // Set SDK token BEFORE making any DB calls
-          if (parsed.token) setAuthToken(parsed.token);
+          setAuthToken(currentToken);
           try {
-            const userData = await dbQuery('users', `id=eq.${parsed.user.id}&select=role,full_name,avatar_url`);
+            const userData = await dbQuery('users', `id=eq.${userDataToUse.user.id}&select=role,full_name,avatar_url`);
             const data = userData?.[0];
-            if (data?.full_name) parsed.user.full_name = data.full_name;
-            if (data?.avatar_url) parsed.user.avatar_url = data.avatar_url;
-            parsed.role = data?.role ?? parsed.role;
+            if (data?.full_name) userDataToUse.user.full_name = data.full_name;
+            if (data?.avatar_url) userDataToUse.user.avatar_url = data.avatar_url;
+            userDataToUse.role = data?.role ?? userDataToUse.role;
           } catch (e) {
             console.error('Failed fetching fresh user data', e);
           }
-          setUser(parsed.user);
-          setRole(parsed.role);
+
+          setUser(userDataToUse.user);
+          setRole(userDataToUse.role);
+
+          // Store updated fields
+          localStorage.setItem('splitmate-user', JSON.stringify(userDataToUse));
+        } else {
+          throw new Error('No valid session');
         }
       } catch {
         localStorage.removeItem('splitmate-user');
+        if ('caches' in window) {
+          caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
+        }
+        setUser(null);
+        setRole(null);
       } finally {
         setLoading(false);
       }
@@ -78,7 +133,11 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
+    await insforge.auth.signOut().catch(() => { });
     localStorage.removeItem('splitmate-user');
+    if ('caches' in window) {
+      caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
+    }
     setUser(null);
     setRole(null);
     window.location.replace('/login');

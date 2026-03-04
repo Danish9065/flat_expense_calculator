@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@insforge/sdk": "^1.1.6-dev.0",
+    "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",

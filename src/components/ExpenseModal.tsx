@@ -5,6 +5,7 @@ import { ExpenseService } from '../services/expenseService';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { useToast } from '../context/ToastContext';
+import imageCompression from 'browser-image-compression';
 import { dbQuery } from '../lib/db';
 
 interface ExpenseModalProps {
@@ -31,7 +32,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     const [receiptFile, setReceiptFile] = useState<File | null>(null);
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurType, setRecurType] = useState<'weekly' | 'monthly'>('monthly');
-    const [loading, setLoading] = useState(false);
+    const [loadingState, setLoadingState] = useState<'idle' | 'compressing' | 'uploading' | 'saving'>('idle');
 
     useEffect(() => {
         if (isOpen) {
@@ -78,20 +79,36 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
         e.preventDefault();
         if (!user || !groupId) return;
 
-        setLoading(true);
+        setLoadingState('compressing');
         try {
             let receiptUrl = editingExpense?.receipt_url;
 
             // 1. Upload receipt if any
             if (receiptFile) {
-                const { data, error: uploadErr } = await insforge.storage
-                    .from('receipts')
-                    .uploadAuto(receiptFile);
+                // Compress image before upload
+                const options = {
+                    maxSizeMB: 0.15,
+                    maxWidthOrHeight: 1280,
+                    useWebWorker: true
+                };
 
-                if (uploadErr) throw new Error('Failed to upload receipt');
-                if (data?.url) receiptUrl = data.url;
+                try {
+                    const compressedFile = await imageCompression(receiptFile, options);
+
+                    setLoadingState('uploading');
+                    const { data, error: uploadErr } = await insforge.storage
+                        .from('receipts')
+                        .uploadAuto(compressedFile);
+
+                    if (uploadErr) throw new Error('Failed to upload receipt');
+                    if (data?.url) receiptUrl = data.url;
+                } catch (compressError) {
+                    console.error('Error compressing image:', compressError);
+                    throw new Error('Failed to compress receipt image');
+                }
             }
 
+            setLoadingState('saving');
             const expenseData = {
                 group_id: groupId,
                 category,
@@ -121,7 +138,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
         } catch (err: any) {
             showError(err.message || 'Failed to save expense');
         } finally {
-            setLoading(false);
+            setLoadingState('idle');
         }
     };
 
@@ -316,11 +333,14 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                     <button
                         type="submit"
                         form="expense-form"
-                        disabled={loading || !amount || !description}
+                        disabled={loadingState !== 'idle' || !amount || !description}
                         className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
                     >
-                        {loading ? <Loader2 className="animate-spin h-5 w-5 mr-2" /> : null}
-                        {loading ? 'Saving...' : (editingExpense ? 'Save Changes' : 'Add Expense')}
+                        {loadingState !== 'idle' ? <Loader2 className="animate-spin h-5 w-5 mr-2" /> : null}
+                        {loadingState === 'compressing' ? 'Compressing...'
+                            : loadingState === 'uploading' ? 'Uploading...'
+                                : loadingState === 'saving' ? 'Saving...'
+                                    : (editingExpense ? 'Save Changes' : 'Add Expense')}
                     </button>
                 </div>
             </div>
