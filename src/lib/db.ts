@@ -6,18 +6,55 @@ const insforge = createClient({
 });
 
 export function setAuthToken(token: string | null) {
+  // @ts-ignore - 'http' might be private in typescript definitions but works at runtime
   insforge.http.userToken = token;
 }
 
-function checkError(error: any) {
-  if (error) {
-    const errStr = JSON.stringify(error);
-    if (errStr.includes('JWT expired') || errStr.includes('PGRST301')) {
-      localStorage.removeItem('splitmate-user');
-      window.location.replace('/login');
+async function executeWithRetry(queryFn: () => Promise<any>) {
+  let result = await queryFn();
+
+  if (result.error) {
+    const errStr = JSON.stringify(result.error);
+    // Intercept 401s or JWT expirations
+    if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('401')) {
+      try {
+        // Attempt to seamlessly refresh the token
+        const { data: sessionData } = await insforge.auth.getCurrentSession();
+        if (sessionData?.session?.accessToken) {
+          const newToken = sessionData.session.accessToken;
+          setAuthToken(newToken);
+
+          // Keep local storage in sync
+          const saved = localStorage.getItem('splitmate-user');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            parsed.token = newToken;
+            localStorage.setItem('splitmate-user', JSON.stringify(parsed));
+          }
+
+          // Retry the original query
+          result = await queryFn();
+        } else {
+          // Genuine token expiration
+          throw new Error('Session expired. Please log in again.');
+        }
+      } catch (e) {
+        window.dispatchEvent(new Event('auth:logout'));
+        throw e;
+      }
     }
-    throw new Error(errStr);
   }
+
+  // Check if error still persists
+  if (result.error) {
+    const finalErrStr = JSON.stringify(result.error);
+    if (finalErrStr.includes('JWT expired') || finalErrStr.includes('PGRST301')) {
+      window.dispatchEvent(new Event('auth:logout'));
+    }
+    throw new Error(finalErrStr || 'Database error occurred');
+  }
+
+  return result.data;
 }
 
 function parseParams(params: string) {
@@ -61,38 +98,37 @@ function applyFilters(query: any, filters: { key: string; op: string; val: strin
 }
 
 export async function dbQuery(table: string, params = '') {
-  const { filters, selectVal, orderCol, orderAsc } = parseParams(params);
-  let query = insforge.database.from(table).select(selectVal);
-  query = applyFilters(query, filters);
-  if (orderCol) query = query.order(orderCol, { ascending: orderAsc });
-  const { data, error } = await query;
-  checkError(error);
-  return data;
+  return executeWithRetry(async () => {
+    const { filters, selectVal, orderCol, orderAsc } = parseParams(params);
+    let query = insforge.database.from(table).select(selectVal);
+    query = applyFilters(query, filters);
+    if (orderCol) query = query.order(orderCol, { ascending: orderAsc });
+    return await query;
+  });
 }
 
 export async function dbInsert(table: string, body: object) {
-  const { data, error } = await insforge.database
-    .from(table).insert([body]).select('*');
-  checkError(error);
-  return data;
+  return executeWithRetry(async () => {
+    return await insforge.database.from(table).insert([body]).select('*');
+  });
 }
 
 export async function dbUpdate(table: string, params: string, body: object) {
-  const { filters, selectVal } = parseParams(params);
-  let query = insforge.database.from(table).update(body).select(selectVal);
-  query = applyFilters(query, filters);
-  const { data, error } = await query;
-  checkError(error);
-  return data;
+  return executeWithRetry(async () => {
+    const { filters, selectVal } = parseParams(params);
+    let query = insforge.database.from(table).update(body).select(selectVal);
+    query = applyFilters(query, filters);
+    return await query;
+  });
 }
 
 export async function dbDelete(table: string, params: string) {
-  const { filters } = parseParams(params);
-  let query = insforge.database.from(table).delete();
-  query = applyFilters(query, filters);
-  const { data, error } = await query;
-  checkError(error);
-  return data;
+  return executeWithRetry(async () => {
+    const { filters } = parseParams(params);
+    let query = insforge.database.from(table).delete();
+    query = applyFilters(query, filters);
+    return await query;
+  });
 }
 
 export default insforge;
