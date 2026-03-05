@@ -18,37 +18,38 @@ async function executeWithRetry(queryFn: () => Promise<any>) {
     // Intercept 401s or JWT expirations
     if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('401')) {
       try {
-        // Attempt to seamlessly refresh the token
-        const { data: sessionData } = await insforge.auth.getCurrentSession();
+        // Use SDK native getCurrentSession to seamlessly refresh the token
+        const { data: sessionData, error } = await insforge.auth.getCurrentSession();
+
+        if (error) {
+          throw error;
+        }
+
         if (sessionData?.session?.accessToken) {
           const newToken = sessionData.session.accessToken;
           setAuthToken(newToken);
 
-          // Keep local storage in sync
-          const saved = localStorage.getItem('splitmate-user');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            parsed.token = newToken;
-            localStorage.setItem('splitmate-user', JSON.stringify(parsed));
-          }
+          // Note: LocalStorage user state doesn't need updating with token anymore 
+          // as AuthContext & setAuthToken manage it solely
 
           // Retry the original query
           result = await queryFn();
         } else {
-          // Genuine token expiration
+          // Genuine token expiration with no viable refresh
           throw new Error('Session expired. Please log in again.');
         }
       } catch (e) {
+        // If the refresh actually failed natively, only then trigger global logout
         window.dispatchEvent(new Event('auth:logout'));
         throw e;
       }
     }
   }
 
-  // Check if error still persists
+  // Check if error still persists after retry
   if (result.error) {
     const finalErrStr = JSON.stringify(result.error);
-    if (finalErrStr.includes('JWT expired') || finalErrStr.includes('PGRST301')) {
+    if (finalErrStr.includes('JWT expired') || finalErrStr.includes('PGRST301') || finalErrStr.includes('401')) {
       window.dispatchEvent(new Event('auth:logout'));
     }
     throw new Error(finalErrStr || 'Database error occurred');

@@ -49,7 +49,7 @@ export default function Dashboard() {
         setLoading(true);
         try {
             // Fetch expenses
-            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id)`);
+            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed)`);
 
             if (expData) {
                 setExpenses(expData);
@@ -112,9 +112,22 @@ export default function Dashboard() {
     // Stats calculation
     const currentMonthExpenses = expenses.filter(e => e.created_at && isThisMonth(new Date(e.created_at)));
     const totalThisMonth = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-    // Rough estimate logic or actual calculated split
-    // Because precise splits are in `expense_splits`, doing an exact lookup for "Your Share this month" requires another query. We can use the net totals fetched earlier for precision everywhere else, but for "Your Share this month", estimating it as (Total / members) is accurate under equal splits.
-    const yourShareEstimate = members.length ? totalThisMonth / members.length : 0;
+    // Exact Share Calculation
+    let exactYourShare = 0;
+
+
+    currentMonthExpenses.forEach(expense => {
+        // Find the split for the current logged-in user
+        const userSplit = expense.expense_splits?.find((s: any) => s.user_id === user?.id);
+        const splitAmount = userSplit && userSplit.amount_owed ? Number(userSplit.amount_owed) : 0;
+
+        exactYourShare += splitAmount;
+
+        // Log the exact cut for mathematical auditing
+
+    });
+
+
 
     const filteredExpenses = expenses.filter(e => filterMode === 'all' || e.category === filterMode);
 
@@ -138,7 +151,7 @@ export default function Dashboard() {
                 <div className="bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total This Month</p>
                     <p className="text-xl font-bold">₹{totalThisMonth.toFixed(0)}</p>
-                    <p className="text-xs text-gray-400 mt-1">Your share: ₹{yourShareEstimate.toFixed(0)}</p>
+                    <p className="text-xs text-gray-400 mt-1">Your share: ₹{exactYourShare.toFixed(0)}</p>
                 </div>
                 <div className={`p-4 rounded-2xl shadow-sm border ${balances.netBalance >= 0
                     ? 'bg-success/10 border-success/20 dark:bg-success/5'
