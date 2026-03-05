@@ -4,9 +4,23 @@ import insforge, { dbQuery, setAuthToken } from '../lib/db';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Optimistically load user data from localStorage
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('splitmate-user');
+      return saved ? JSON.parse(saved).user : null;
+    } catch { return null; }
+  });
+
+  const [role, setRole] = useState(() => {
+    try {
+      const saved = localStorage.getItem('splitmate-user');
+      return saved ? JSON.parse(saved).role : null;
+    } catch { return null; }
+  });
+
+  // If we have a cached user, don't show the loading screen initially
+  const [loading, setLoading] = useState(!user);
 
   // Global log out listener for interceptors
   useEffect(() => {
@@ -23,73 +37,80 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const init = async () => {
+    let mounted = true;
+
+    const fetchUserRoleSilently = async (sessionUser) => {
       try {
-        let currentToken = null;
-        let userDataToUse = null;
+        const userData = await dbQuery('users', `id=eq.${sessionUser.id}&select=role,full_name,avatar_url`);
+        const data = userData?.[0];
 
-        const saved = localStorage.getItem('splitmate-user');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          currentToken = parsed.token;
-          userDataToUse = parsed;
+        if (mounted && data) {
+          const updatedUser = {
+            ...sessionUser,
+            full_name: data.full_name || sessionUser.user_metadata?.full_name,
+            avatar_url: data.avatar_url || sessionUser.user_metadata?.avatar_url
+          };
+          const userRole = data.role ?? 'member';
+
+          setUser(updatedUser);
+          setRole(userRole);
+
+          localStorage.setItem('splitmate-user', JSON.stringify({
+            user: updatedUser,
+            role: userRole
+          }));
         }
-
-        // Always try to verify/refresh the session on load
-        try {
-          const { data: sessionData } = await insforge.auth.getCurrentSession();
-          if (sessionData?.session?.accessToken) {
-            currentToken = sessionData.session.accessToken;
-            if (userDataToUse) {
-              userDataToUse.token = currentToken;
-            } else {
-              // Edge case: valid cookie session but local storage missing
-              userDataToUse = {
-                user: sessionData.session.user,
-                role: 'member',
-                token: currentToken
-              };
-            }
-            // Update local storage preemptively
-            localStorage.setItem('splitmate-user', JSON.stringify(userDataToUse));
-          }
-        } catch (e) {
-          console.error("Session refresh failed:", e);
-        }
-
-        if (userDataToUse && currentToken) {
-          // Set SDK token BEFORE making any DB calls
-          setAuthToken(currentToken);
-          try {
-            const userData = await dbQuery('users', `id=eq.${userDataToUse.user.id}&select=role,full_name,avatar_url`);
-            const data = userData?.[0];
-            if (data?.full_name) userDataToUse.user.full_name = data.full_name;
-            if (data?.avatar_url) userDataToUse.user.avatar_url = data.avatar_url;
-            userDataToUse.role = data?.role ?? userDataToUse.role;
-          } catch (e) {
-            console.error('Failed fetching fresh user data', e);
-          }
-
-          setUser(userDataToUse.user);
-          setRole(userDataToUse.role);
-
-          // Store updated fields
-          localStorage.setItem('splitmate-user', JSON.stringify(userDataToUse));
-        } else {
-          throw new Error('No valid session');
-        }
-      } catch {
-        localStorage.removeItem('splitmate-user');
-        if ('caches' in window) {
-          caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
-        }
-        setUser(null);
-        setRole(null);
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.error('Failed fetching fresh user data silently', e);
       }
     };
-    init();
+
+    const initializeAuth = async () => {
+      try {
+        // Use SDK's native session validation
+        const { data: sessionData, error } = await insforge.auth.getCurrentSession();
+        const session = sessionData?.session;
+
+        if (error) {
+          console.error("Auth init session error:", error);
+          return;
+        }
+
+        if (session?.accessToken) {
+          setAuthToken(session.accessToken);
+          // Silently validate and fetch role in the background
+          await fetchUserRoleSilently(session.user);
+        } else {
+          // No valid session, gently clear local data
+          setUser(null);
+          setRole(null);
+          localStorage.removeItem('splitmate-user');
+        }
+      } catch (err) {
+        console.error("Auth init exception:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    // Listen to SDK native auth state changes, such as token refreshes!
+    const { data: authListener } = insforge.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        window.dispatchEvent(new Event('auth:logout'));
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        setAuthToken(session.accessToken);
+        if (event === 'SIGNED_IN') {
+          // Let the signIn function handle the initial setup instead to avoid race conditions
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email, password) => {
@@ -126,20 +147,13 @@ export function AuthProvider({ children }) {
     localStorage.setItem('splitmate-user', JSON.stringify({
       user: data.user,
       role: userRole,
-      fullName,
-      token: data.accessToken
     }));
     window.location.replace(userRole === 'admin' ? '/admin' : '/dashboard');
   };
 
   const signOut = async () => {
     await insforge.auth.signOut().catch(() => { });
-    localStorage.removeItem('splitmate-user');
-    if ('caches' in window) {
-      caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
-    }
-    setUser(null);
-    setRole(null);
+    window.dispatchEvent(new Event('auth:logout'));
     window.location.replace('/login');
   };
 
