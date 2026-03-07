@@ -79,18 +79,15 @@ export function AuthProvider({ children }) {
               localStorage.setItem('splitmate-user', JSON.stringify({
                 user: updatedUser,
                 role: userRole,
-                token
+                token,
+                refreshToken: parsed.refreshToken
               }));
             }
           } catch (e) {
             console.error('Failed fetching fresh user data silently', e);
-            if (mounted) {
-              // Graceful Fail: If background validation fails (e.g., 401 Unauthorized)
-              setUser(null);
-              setRole(null);
-              setAuthToken(null);
-              localStorage.removeItem('splitmate-user');
-            }
+            // DO NOT clear localStorage or user state here.
+            // If it was an auth error, db.ts already dispatched 'auth:logout' which handles cleanup.
+            // If it was a network error, we want to retain the optimistic cached user state.
           }
         } else {
           // No valid token data in cache
@@ -116,7 +113,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signIn = async (email, password) => {
-    const res = await fetch(`${import.meta.env.VITE_INSFORGE_URL}/api/auth/sessions`, {
+    const res = await fetch(`${import.meta.env.VITE_INSFORGE_URL}/api/auth/sessions?client_type=mobile`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -149,7 +146,8 @@ export function AuthProvider({ children }) {
     localStorage.setItem('splitmate-user', JSON.stringify({
       user: data.user,
       role: userRole,
-      token: data.accessToken // Save token for optimistic loading
+      token: data.accessToken, // Save token for optimistic loading
+      refreshToken: data.refreshToken
     }));
     window.location.replace(userRole === 'admin' ? '/admin' : '/dashboard');
   };
