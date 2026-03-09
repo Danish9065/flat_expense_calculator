@@ -57,9 +57,52 @@ export function AuthProvider({ children }) {
 
         const parsed = JSON.parse(saved);
         const sessionUser = parsed.user;
-        const token = parsed.token;
+        let token = parsed.token;
+        const refreshToken = parsed.refreshToken;
 
         if (token && sessionUser) {
+          // Proactive Refresh if expired on load
+          const isTokenExpired = () => {
+            try {
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              return payload.exp * 1000 < Date.now() + 5000;
+            } catch { return true; }
+          };
+
+          if (isTokenExpired() && refreshToken) {
+            let res;
+            try {
+              const backendUrl = import.meta.env.VITE_INSFORGE_URL;
+              res = await fetch(`${backendUrl}/api/auth/refresh?client_type=mobile`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': import.meta.env.VITE_INSFORGE_ANON_KEY
+                },
+                body: JSON.stringify({ refreshToken })
+              });
+            } catch (networkErr) {
+              console.error('Network offline, session dormant', networkErr);
+            }
+
+            if (res) {
+              try {
+                const resData = await res.json();
+                if (res.ok && resData.accessToken && resData.refreshToken) {
+                  token = resData.accessToken;
+                  setAuthToken(token);
+                  parsed.token = token;
+                  parsed.refreshToken = resData.refreshToken;
+                  localStorage.setItem('splitmate-user', JSON.stringify(parsed));
+                } else {
+                  console.error('Network offline, session dormant');
+                }
+              } catch (jsonErr) {
+                console.error('Network offline, session dormant', jsonErr);
+              }
+            }
+          }
+
           // Silently validate and fetch role in the background
           try {
             const userData = await dbQuery('users', `id=eq.${sessionUser.id}&select=role,full_name,avatar_url`);
@@ -85,17 +128,15 @@ export function AuthProvider({ children }) {
             }
           } catch (e) {
             console.error('Failed fetching fresh user data silently', e);
-            // DO NOT clear localStorage or user state here.
-            // If it was an auth error, db.ts already dispatched 'auth:logout' which handles cleanup.
-            // If it was a network error, we want to retain the optimistic cached user state.
+            // Leave session dormant. Do NOT wipe localStorage.
           }
         } else {
-          // No valid token data in cache
+          // No valid token/user in cache, gracefully downgrade to logged out state without wiping other local data aggressively.
           if (mounted) {
             setUser(null);
             setRole(null);
             setAuthToken(null);
-            localStorage.removeItem('splitmate-user');
+            // DO NOT aggressively call localStorage.removeItem here, ensure logout is explicit.
           }
         }
       } catch (err) {
