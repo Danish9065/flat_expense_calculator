@@ -10,33 +10,71 @@ export function setAuthToken(token: string | null) {
   insforge.http.userToken = token;
 }
 
-async function executeWithRetry(queryFn: () => Promise<any>) {
+let isRefreshing = false;
+let refreshSubscribers: ((error?: Error) => void)[] = [];
+
+async function executeWithRetry(queryFn: () => Promise<any>): Promise<any> {
   let result = await queryFn();
 
   if (result.error) {
     const errStr = JSON.stringify(result.error);
     // Intercept 401s, JWT expirations, or malformed UUIDs (22P02)
     if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('401') || errStr.includes('22P02')) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          refreshSubscribers.push((err) => {
+            if (err) return reject(err);
+            resolve(executeWithRetry(queryFn));
+          });
+        });
+      }
+
+      isRefreshing = true;
+
       try {
         const saved = localStorage.getItem('splitmate-user');
         if (!saved) throw new Error('No saved session found');
-        const parsed = JSON.parse(saved);
-        const refreshToken = parsed.refreshToken;
-        if (!refreshToken) throw new Error('No refresh token available');
+        const authData = JSON.parse(saved);
+        const currentRefreshToken = authData.refreshToken;
+        if (!currentRefreshToken) { throw new Error('No refresh token found in storage'); }
 
-        // Manually refresh token using the mobile client_type
-        const res = await fetch(`${import.meta.env.VITE_INSFORGE_URL}/api/auth/refresh?client_type=mobile`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': import.meta.env.VITE_INSFORGE_ANON_KEY
-          },
-          body: JSON.stringify({ refreshToken })
-        });
+        // Manually refresh token using the custom API endpoint
+        let res;
+        try {
+          const backendUrl = import.meta.env.VITE_INSFORGE_URL;
+          res = await fetch(`${backendUrl}/api/auth/refresh?client_type=mobile`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': import.meta.env.VITE_INSFORGE_ANON_KEY
+            },
+            body: JSON.stringify({ refreshToken: currentRefreshToken })
+          });
+        } catch (networkErr) {
+          console.error('Network offline, session dormant', networkErr);
+          throw new Error('Network offline, session dormant');
+        }
 
-        const resData = await res.json();
+        let resData;
+        try {
+          resData = await res.json();
+        } catch (jsonErr) {
+          console.error('Network offline, session dormant', jsonErr);
+          throw new Error('Network offline, session dormant');
+        }
+
         if (!res.ok) {
-          throw new Error(resData.message || 'Session expired. Please log in again.');
+          if (res.status === 401 || res.status === 400) {
+            // Scenario B: The refresh token itself is truly dead or rejected.
+            // ONLY THEN wipe local storage and force redirect to /login
+            localStorage.removeItem('splitmate-user');
+            window.dispatchEvent(new Event('auth:logout'));
+            window.location.replace('/login');
+            throw new Error('Refresh token dead. Hard logged out.');
+          }
+          // For other server errors (like 500), let it fall through to dormant state
+          console.error('Network offline, session dormant');
+          throw new Error('Network offline, session dormant');
         }
 
         if (resData.accessToken && resData.refreshToken) {
@@ -44,21 +82,34 @@ async function executeWithRetry(queryFn: () => Promise<any>) {
           setAuthToken(newToken);
 
           // Update localStorage seamlessly so AuthContext stays in sync
-          parsed.token = newToken;
-          parsed.refreshToken = resData.refreshToken;
-          localStorage.setItem('splitmate-user', JSON.stringify(parsed));
+          authData.token = newToken;
+          authData.refreshToken = resData.refreshToken;
+          localStorage.setItem('splitmate-user', JSON.stringify(authData));
+
+          isRefreshing = false;
+          const currentSubscribers = [...refreshSubscribers];
+          refreshSubscribers = [];
+          currentSubscribers.forEach(cb => cb());
 
           // Retry the original query
           result = await queryFn();
         } else {
-          throw new Error('Invalid refresh response');
+          console.error('Network offline, session dormant');
+          throw new Error('Network offline, session dormant');
         }
-      } catch (e) {
-        // If the refresh actually failed natively, wipe corrupted session and redirect
-        localStorage.removeItem('splitmate-user');
-        window.dispatchEvent(new Event('auth:logout'));
-        window.location.replace('/login');
-        throw e;
+      } catch (e: any) {
+        isRefreshing = false;
+        let errorToThrow = e;
+        if (e.message !== 'Refresh token dead. Hard logged out.') {
+          console.error('Network offline, session dormant', e);
+          errorToThrow = new Error('Network offline, session dormant');
+        }
+
+        const currentSubscribers = [...refreshSubscribers];
+        refreshSubscribers = [];
+        currentSubscribers.forEach(cb => cb(errorToThrow));
+
+        throw errorToThrow;
       }
     }
   }
@@ -66,11 +117,6 @@ async function executeWithRetry(queryFn: () => Promise<any>) {
   // Check if error still persists after retry
   if (result.error) {
     const finalErrStr = JSON.stringify(result.error);
-    if (finalErrStr.includes('JWT expired') || finalErrStr.includes('PGRST301') || finalErrStr.includes('401') || finalErrStr.includes('22P02')) {
-      localStorage.removeItem('splitmate-user');
-      window.dispatchEvent(new Event('auth:logout'));
-      window.location.replace('/login');
-    }
     throw new Error(finalErrStr || 'Database error occurred');
   }
 
