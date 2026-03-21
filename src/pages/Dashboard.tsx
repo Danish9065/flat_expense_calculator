@@ -5,19 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { format, isThisMonth } from 'date-fns';
-import { Plus, Home, Utensils, Edit2, Trash2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Receipt, ShoppingCart, Zap, Building } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp } from 'lucide-react';
 import ExpenseModal from '../components/ExpenseModal';
 import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/ConfirmModal';
-
-export const CATEGORY_MAP: Record<string, { icon: any, colorClass: string }> = {
-    'Home': { icon: Home, colorClass: 'bg-primary/10 text-primary' },
-    'Kitchen': { icon: Utensils, colorClass: 'bg-warning/10 text-warning' },
-    'Groceries': { icon: ShoppingCart, colorClass: 'bg-success/10 text-success' },
-    'Utilities': { icon: Zap, colorClass: 'bg-cyan-500/10 text-cyan-500' },
-    'Rent': { icon: Building, colorClass: 'bg-purple-500/10 text-purple-500' },
-    'General': { icon: Receipt, colorClass: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300' }
-};
+import { CATEGORY_MAP } from '../constants/categories';
 
 export default function Dashboard() {
     const { user } = useAuth();
