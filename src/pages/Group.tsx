@@ -110,16 +110,29 @@ export default function GroupPage() {
         if (!groupId) return;
         setExporting(true);
         try {
+            // Fetch expenses with paid_by user info AND split info (including amount_owed)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const expenses: any = await dbQuery('expenses', `group_id=eq.${groupId}&select=*&order=created_at.desc`);
+            const expenses: any = await dbQuery(
+                'expenses',
+                `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed)`
+            );
 
             if (!expenses || expenses.length === 0) {
                 showError('No expenses to export');
                 return;
             }
 
+            const totalMemberCount = members.length;
+
+            // Helper: resolve a user_id to full_name via the members context
+            const resolveNameById = (userId: string): string => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const m = members.find((mem: any) => mem.user_id === userId);
+                return m?.users?.full_name || userId;
+            };
+
             // Build CSV
-            const headers = ['Date', 'Item', 'Category', 'Amount', 'Added By (User ID)', 'Name', 'Email', 'Note'];
+            const headers = ['Date', 'Item', 'Category', 'Amount', 'Paid By', 'For (Members)', 'Each Share', 'Note'];
             const csvRows = [headers.join(',')];
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,22 +141,57 @@ export default function GroupPage() {
                 const note = e.note ? `"${e.note.replace(/"/g, '""')}"` : '';
                 const item = `"${e.item_name.replace(/"/g, '""')}"`;
 
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const memberInfo = members.find((m: any) => m.user_id === e.added_by)?.users;
-                const name = memberInfo?.full_name ? `"${memberInfo.full_name.replace(/"/g, '""')}"` : 'Unknown';
-                const email = memberInfo?.email ? `"${memberInfo.email.replace(/"/g, '""')}"` : 'Unknown';
+                // Paid By: prefer joined users.full_name (from added_by FK), fallback to member lookup
+                const paidByName: string =
+                    e.users?.full_name || resolveNameById(e.added_by) || 'Unknown';
+                const paidByCell = `"${paidByName.replace(/"/g, '""')}"`;
 
-                csvRows.push([
+                // For (Members): resolve split entries to names
+                const splitEntries: { user_id: string; amount_owed: number }[] = e.expense_splits || [];
+                let forCell: string;
+                if (splitEntries.length === 0 || splitEntries.length >= totalMemberCount) {
+                    forCell = 'All Members';
+                } else {
+                    const splitNames = splitEntries.map((s) => resolveNameById(s.user_id)).join('; ');
+                    forCell = `"${splitNames.replace(/"/g, '""')}"`;
+                }
+
+                // Each Share: if all splits have the same amount → single value; otherwise name:amount pairs
+                let shareCell: string;
+                if (splitEntries.length === 0) {
+                    shareCell = '';
+                } else {
+                    const amounts = splitEntries.map((s) => Number(s.amount_owed));
+                    const allEqual = amounts.every((a) => a === amounts[0]);
+                    if (allEqual) {
+                        shareCell = `₹${amounts[0].toFixed(2)}`;
+                    } else {
+                        const parts = splitEntries.map(
+                            (s) => `${resolveNameById(s.user_id)}:₹${Number(s.amount_owed).toFixed(2)}`
+                        ).join('; ');
+                        shareCell = `"${parts}"`;
+                    }
+                }
+
+                const row = [
                     date,
                     item,
                     e.category,
                     e.amount,
-                    e.added_by,
-                    name,
-                    email,
+                    paidByCell,
+                    forCell,
+                    shareCell,
                     note
-                ].join(','));
+                ];
+
+                csvRows.push(row.join(','));
             });
+
+            // Debug: log the first data row so you can verify values in the browser console
+            if (csvRows.length > 1) {
+                console.log('[CSV Export] Headers:', csvRows[0]);
+                console.log('[CSV Export] First row:', csvRows[1]);
+            }
 
             const csvContent = csvRows.join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
