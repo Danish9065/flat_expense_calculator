@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { dbQuery } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
@@ -39,16 +39,16 @@ export default function Balance() {
                 const userTotals: Record<string, number> = {};
                 const catTotals: Record<string, number> = {};
 
-                expenses.forEach(e => {
+                expenses.forEach((e: any) => {
                     userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
                 });
 
-                const cData = members.map((m, index) => ({
+                const cData = members.map((m: any, index: number) => ({
                     name: m.users?.full_name?.split(' ')[0] || 'Member',
                     value: userTotals[m.user_id] || 0,
                     color: COLORS[index % COLORS.length]
-                })).filter(d => d.value > 0);
+                })).filter((d: any) => d.value > 0);
 
                 setChartData(cData);
                 setCategoryTotals(catTotals);
@@ -73,13 +73,21 @@ export default function Balance() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleSettleUp = async (settlement: any) => {
         if (!groupId || !user) return;
-        setSettling(settlement.from + settlement.to);
+
+        // Guard: ONLY the creditor (s.to) may confirm receipt of payment.
+        // This prevents the debtor from self-confirming.
+        if (user.id !== settlement.to) return;
+
+        // Use a separator so "abc" + "def" != "ab" + "cdef"
+        const settlingKey = `${settlement.from}__${settlement.to}`;
+        if (settling === settlingKey) return; // Prevent double-click
+        setSettling(settlingKey);
 
         try {
-            await SettlementService.settleUp(groupId, settlement.from, settlement.to, settlement.amount, category);
+            await SettlementService.settleUp(groupId, settlement.from, settlement.to, settlement.amount);
             success('Settlement recorded successfully!');
-            fetchBalanceData(); // refresh UI
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await fetchBalanceData(); // await so UI doesn't flash stale data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Failed to settle up');
         } finally {
@@ -88,11 +96,11 @@ export default function Balance() {
     };
 
     const getMemberName = (id: string) => {
-        return members.find(m => m.user_id === id)?.users?.full_name || 'Someone';
+        return members.find((m: any) => m.user_id === id)?.users?.full_name || 'Someone';
     };
 
     const getMemberAvatar = (id: string) => {
-        const url = members.find(m => m.user_id === id)?.users?.avatar_url;
+        const url = members.find((m: any) => m.user_id === id)?.users?.avatar_url;
         if (url) return url;
         // fallback avatar based on name
         const name = getMemberName(id);
@@ -136,7 +144,7 @@ export default function Balance() {
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(value: number) => `₹${value.toFixed(0)}`}
+                                    formatter={(value: number | undefined) => `₹${(value ?? 0).toFixed(0)}`}
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
@@ -222,23 +230,37 @@ export default function Balance() {
 
                                     <div className="flex items-center space-x-4 pl-4 border-l border-gray-100 dark:border-gray-700 ml-2">
                                         <div className="text-right">
-                                            <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(0)}</span>
+                                            <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
-                                        {user?.id === s.to ? (
-                                            <button
-                                                onClick={() => handleSettleUp(s)}
-                                                disabled={settling === s.from + s.to}
-                                                className="bg-primary text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                                            >
-                                                {settling === s.from + s.to ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle'}
-                                            </button>
-                                        ) : user?.id === s.from ? (
-                                            <div className="text-[10px] text-gray-500 italic max-w-[80px] leading-tight text-center">
-                                                Waiting for {getMemberName(s.to).split(' ')[0]} to confirm payment
-                                            </div>
-                                        ) : (
-                                            <div className="px-3 py-2"></div> /* spacer for alignment if not involved */
-                                        )}
+                                        {(() => {
+                                            const settlingKey = `${s.from}__${s.to}`;
+                                            const isCreditor = user?.id === s.to;   // person who is owed — confirms receipt
+                                            const isDebtor   = user?.id === s.from; // person who owes — waits for confirmation
+                                            const isSettlingNow = settling === settlingKey;
+
+                                            if (isCreditor) {
+                                                // Creditor confirms they received the cash
+                                                return (
+                                                    <button
+                                                        onClick={() => handleSettleUp(s)}
+                                                        disabled={isSettlingNow}
+                                                        className="bg-primary text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                                                    >
+                                                        {isSettlingNow ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle'}
+                                                    </button>
+                                                );
+                                            }
+                                            if (isDebtor) {
+                                                // Debtor waits — they've paid but creditor hasn't confirmed yet
+                                                return (
+                                                    <div className="text-[10px] text-gray-500 italic max-w-[80px] leading-tight text-center">
+                                                        Pending payment...
+                                                    </div>
+                                                );
+                                            }
+                                            // Third-party member sees nothing
+                                            return <div className="px-3 py-2" />;
+                                        })()}
                                     </div>
 
                                 </div>

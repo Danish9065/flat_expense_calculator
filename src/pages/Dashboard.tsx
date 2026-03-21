@@ -109,6 +109,17 @@ export default function Dashboard() {
         return m?.users?.full_name || 'Someone';
     };
 
+    // Resolve split_between user IDs to display names.
+    // If all group members are included, returns "All".
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resolveSplitNames = (expense: any): string => {
+        const splitEntries: { user_id: string }[] = expense.expense_splits || [];
+        if (splitEntries.length === 0) return '';
+        // Compare with total group members count
+        if (splitEntries.length >= members.length && members.length > 0) return 'All';
+        return splitEntries.map((s) => getMemberName(s.user_id)).join(', ');
+    };
+
     // Stats calculation
     const currentMonthExpenses = expenses.filter(e => e.created_at && isThisMonth(new Date(e.created_at)));
     const totalThisMonth = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -150,8 +161,8 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-3 mb-6">
                 <div className="bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total This Month</p>
-                    <p className="text-xl font-bold">₹{totalThisMonth.toFixed(0)}</p>
-                    <p className="text-xs text-gray-400 mt-1">Your share: ₹{exactYourShare.toFixed(0)}</p>
+                    <p className="text-xl font-bold">₹{totalThisMonth.toFixed(2)}</p>
+                    <p className="text-xs text-gray-400 mt-1">Your share: ₹{exactYourShare.toFixed(2)}</p>
                 </div>
                 <div className={`p-4 rounded-2xl shadow-sm border ${balances.netBalance >= 0
                     ? 'bg-success/10 border-success/20 dark:bg-success/5'
@@ -163,7 +174,7 @@ export default function Dashboard() {
                     <div className="flex items-center">
                         {balances.netBalance >= 0 ? <ArrowUpRight className="w-5 h-5 text-success mr-1" /> : <ArrowDownRight className="w-5 h-5 text-danger mr-1" />}
                         <p className={`text-xl font-bold ${balances.netBalance >= 0 ? 'text-success' : 'text-danger'}`}>
-                            ₹{Math.abs(balances.netBalance).toFixed(0)}
+                            ₹{Math.abs(balances.netBalance).toFixed(2)}
                         </p>
                     </div>
                     <p className={`text-xs mt-1 ${balances.netBalance >= 0 ? 'text-success/80' : 'text-danger/80'}`}>
@@ -217,7 +228,7 @@ export default function Dashboard() {
                             key={expense.id}
                             expense={expense}
                             memberName={getMemberName(expense.added_by)}
-                            splitNames={expense.expense_splits?.map((s: any) => getMemberName(s.user_id)).join(', ')}
+                            splitNames={resolveSplitNames(expense)}
                             onEdit={() => { setEditingExpense(expense); setModalOpen(true); }}
                             onDelete={() => setExpenseToDelete(expense.id)}
                             isOwner={user?.id === expense.added_by}
