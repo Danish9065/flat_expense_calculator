@@ -7,6 +7,7 @@ import { useGroup } from '../context/GroupContext';
 import { useToast } from '../context/ToastContext';
 import imageCompression from 'browser-image-compression';
 import { dbQuery } from '../lib/db';
+import { CATEGORIES } from '../constants/categories';
 
 interface ExpenseModalProps {
     isOpen: boolean;
@@ -17,7 +18,7 @@ interface ExpenseModalProps {
     onSuccess?: () => void;
 }
 
-export const CATEGORIES = ['General', 'Home', 'Kitchen', 'Groceries', 'Utilities', 'Rent'];
+
 
 export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense, onSuccess }: ExpenseModalProps) {
     const { user } = useAuth();
