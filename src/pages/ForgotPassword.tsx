@@ -24,8 +24,8 @@ export default function ForgotPassword() {
                 throw new Error(error.message || 'Failed to send reset email');
             }
 
-            success('Password reset email sent! Check your inbox.');
-            navigate('/login');
+            success('OTP sent! Check your inbox.');
+            navigate('/verify-password-otp', { state: { email } });
 
         } catch (err: any) {
             showError(err.message || 'An unexpected error occurred');
@@ -38,10 +38,10 @@ export default function ForgotPassword() {
         <div className="min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
             <div className="sm:mx-auto sm:w-full sm:max-w-md">
                 <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-gray-100">
-                    Reset Password
+                    Forgot Password
                 </h2>
                 <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-                    Enter your email to receive a password reset link.
+                    Enter your email and we'll send you a 6-digit OTP.
                 </p>
             </div>
 
@@ -71,7 +71,7 @@ export default function ForgotPassword() {
                                 disabled={loading || !email}
                                 className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
                             >
-                                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Send reset link'}
+                                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Send OTP'}
                             </button>
                         </div>
                     </form>

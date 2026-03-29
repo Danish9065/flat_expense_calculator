@@ -5,6 +5,8 @@ import { ToastProvider } from './context/ToastContext';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import VerifyOtp from './pages/auth/VerifyOtp';
+import VerifyPasswordOTP from './pages/auth/VerifyPasswordOTP';
+import ResetPassword from './pages/auth/ResetPassword';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Balance from './pages/Balance';
@@ -54,6 +56,8 @@ function App() {
                     <Route path="/signup" element={<div className="-mt-16 md:-mt-20"><Signup /></div>} />
                     <Route path="/verify-otp" element={<div className="-mt-16 md:-mt-20"><VerifyOtp /></div>} />
                     <Route path="/forgot-password" element={<div className="-mt-16 md:-mt-20"><ForgotPassword /></div>} />
+                    <Route path="/verify-password-otp" element={<div className="-mt-16 md:-mt-20"><VerifyPasswordOTP /></div>} />
+                    <Route path="/reset-password" element={<div className="-mt-16 md:-mt-20"><ResetPassword /></div>} />
 
                     {/* Protected Routes */}
                     <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

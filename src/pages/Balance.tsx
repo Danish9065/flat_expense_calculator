@@ -5,7 +5,7 @@ import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
-import { CATEGORY_MAP } from './Dashboard';
+import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
 
 // Colors for the donut chart

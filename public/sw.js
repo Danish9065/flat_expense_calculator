@@ -1,4 +1,4 @@
-const CACHE_NAME = 'splitmate-cache-v2';
+const CACHE_NAME = 'splitmate-cache-v3';
 
 self.addEventListener('install', (e) => {
     self.skipWaiting(); // Force the waiting service worker to become the active service worker.
