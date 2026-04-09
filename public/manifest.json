@@ -3,7 +3,7 @@
   "short_name": "SplitMate",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F8F7FF",
+  "background_color": "#f0f0ff",
   "theme_color": "#6C63FF",
   "icons": [
     {

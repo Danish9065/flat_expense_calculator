@@ -19,6 +19,7 @@ import NotFound from './pages/NotFound';
 import ErrorBoundary from './components/ErrorBoundary';
 import TopNavbar from './components/TopNavbar';
 import BottomNav from './components/BottomNav';
+import InstallPrompt from './components/InstallPrompt';
 
 const ProtectedRoute = ({ children, adminOnly = false }: { children: React.ReactNode, adminOnly?: boolean }) => {
   const { user, role, loading } = useAuth();
@@ -74,6 +75,7 @@ function App() {
                 </main>
 
                 <BottomNav />
+                <InstallPrompt />
               </div>
             </ToastProvider>
           </GroupProvider>

@@ -187,13 +187,45 @@ export default function GroupPage() {
                 csvRows.push(row.join(','));
             });
 
-            // Debug: log the first data row so you can verify values in the browser console
-            if (csvRows.length > 1) {
-                console.log('[CSV Export] Headers:', csvRows[0]);
-                console.log('[CSV Export] First row:', csvRows[1]);
+            // ── Settlement rows ────────────────────────────────────────────
+            // Fetch all settlements for this group (most recent first).
+            // The table has no status column — every row is an implicit confirmed settlement.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const settlements: any = await dbQuery(
+                'settlements',
+                `group_id=eq.${groupId}&order=settled_at.desc&select=*`
+            );
+
+            const settlementRows: string[] = [];
+            if (settlements && settlements.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                settlements.forEach((s: any) => {
+                    const date = s.settled_at
+                        ? format(new Date(s.settled_at), 'yyyy-MM-dd HH:mm:ss')
+                        : '';
+                    const item = '"Settlement Payment"';
+                    const category = 'Settlement';
+                    const amount = Number(s.amount).toFixed(2);
+                    const paidBy = `"${resolveNameById(s.paid_by).replace(/"/g, '""')}"`;
+                    const forMember = `"${resolveNameById(s.paid_to).replace(/"/g, '""')}"`;
+                    const eachShare = Number(s.amount).toFixed(2);
+                    const note = '"Settled ✓"';
+
+                    settlementRows.push([date, item, category, amount, paidBy, forMember, eachShare, note].join(','));
+                });
             }
 
-            const csvContent = csvRows.join('\n');
+            // Build final CSV: settlement rows (newest first) then expense rows
+            const allDataRows = [...settlementRows, ...csvRows.slice(1)];
+            const finalCsvRows = [csvRows[0], ...allDataRows];
+
+            // Debug: log the first data row so you can verify values in the browser console
+            if (finalCsvRows.length > 1) {
+                console.log('[CSV Export] Headers:', finalCsvRows[0]);
+                console.log('[CSV Export] First row:', finalCsvRows[1]);
+            }
+
+            const csvContent = finalCsvRows.join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
 
