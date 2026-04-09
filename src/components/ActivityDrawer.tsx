@@ -16,8 +16,10 @@ interface ActivityEvent {
     type: string;
     message: string;
     actor_id: string;
+    group_id: string;
     created_at: string;
     is_read: boolean;
+    groups?: { name: string } | null;
 }
 
 export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: ActivityDrawerProps) {
@@ -28,7 +30,7 @@ export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: Acti
     const fetchFeed = async () => {
         if (!user) return;
         try {
-            const data = await dbQuery('notifications', `user_id=eq.${user.id}&order=created_at.desc`);
+            const data = await dbQuery('notifications', `select=*,groups(name)&user_id=eq.${user.id}&order=created_at.desc`);
             if (data) setActivities(data as ActivityEvent[]);
         } catch (err) {
             console.error("Failed to load feed", err);
@@ -168,6 +170,12 @@ export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: Acti
                                             <p className="text-sm text-gray-900 dark:text-gray-200 pr-5">
                                                 {act.message}
                                             </p>
+                                            {act.groups?.name && (
+                                                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+                                                    <span>📁</span>
+                                                    <span>{act.groups.name}</span>
+                                                </p>
+                                            )}
                                             <div className="flex items-center justify-between mt-2">
                                                 <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                                                     {formatDistanceToNow(new Date(act.created_at), { addSuffix: true })}
