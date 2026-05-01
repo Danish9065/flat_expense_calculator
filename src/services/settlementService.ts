@@ -17,11 +17,6 @@ export const SettlementService = {
             return { totalPaid: 0, totalOwed: 0, netBalance: 0 };
         }
 
-        // totalPaid = sum of all expense amounts where this user is the payer
-        const totalPaid = (groupExpenses as any[])
-            .filter((e: any) => e.added_by === userId)
-            .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
-
         // Build expenseId → added_by map
         const expenseCreditorMap: Record<string, string> = {};
         for (const exp of groupExpenses as any[]) {
@@ -31,14 +26,18 @@ export const SettlementService = {
         const expenseIds = (groupExpenses as any[]).map((e: any) => e.id);
         const expenseIdsStr = `(${expenseIds.join(',')})`;
 
-        // Step 2: Fetch only UNSETTLED splits — excludes splits already confirmed as settled
+        // Step 2: Fetch only UNSETTLED splits — excludes splits already confirmed as settled.
+        // IMPORTANT: Both totalOwed and realOwedToMe must come from the SAME unsettled-splits
+        // dataset so that after a settlement both sides of the equation drop together.
+        // Previously totalPaid was derived from raw expense amounts (never updated after settling)
+        // causing netBalance to stay stale even when all splits were cleared.
         const splits = await dbQuery(
             'expense_splits',
             `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,user_id,expense_id`
         );
 
-        let totalOwed = 0;      // what this user owes others
-        let realOwedToMe = 0;   // what others owe this user
+        let totalOwed = 0;      // what this user still owes others (unsettled)
+        let realOwedToMe = 0;   // what others still owe this user (unsettled)
 
         (splits as any[] || []).forEach((split: any) => {
             const debtor = split.user_id;
@@ -52,10 +51,13 @@ export const SettlementService = {
             }
         });
 
+        // totalPaid reflects the gross amount the user has covered for others that
+        // is still unsettled. Use realOwedToMe as the "pending receivable" so the
+        // Dashboard widget immediately drops to ₹0 once all splits are settled.
         const netBalance = Math.round((realOwedToMe - totalOwed) * 100) / 100;
 
         return {
-            totalPaid: Math.round(totalPaid * 100) / 100,
+            totalPaid: Math.round(realOwedToMe * 100) / 100,   // unsettled receivable (not raw total)
             totalOwed: Math.round(totalOwed * 100) / 100,
             netBalance,
         };

@@ -91,7 +91,11 @@ export default function Balance() {
         try {
             await SettlementService.settleUp(groupId, settlement.from, settlement.to, settlement.amount);
             success('Settlement recorded successfully!');
-            await fetchBalanceData(); // await so UI doesn't flash stale data
+            // Re-fetch Balance page data (settlements list + chart)
+            await fetchBalanceData();
+            // Notify Dashboard (and any other mount) to refresh its balance widget.
+            // Uses a window CustomEvent so we don't need shared context / prop drilling.
+            window.dispatchEvent(new CustomEvent('settle-complete'));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Failed to settle up');

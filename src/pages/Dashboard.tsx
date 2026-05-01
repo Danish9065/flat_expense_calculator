@@ -62,6 +62,19 @@ export default function Dashboard() {
         fetchInitialData();
     }, [groupId, user]);
 
+    // Re-fetch balance whenever Balance.tsx fires a settle-complete event
+    useEffect(() => {
+        const onSettle = () => {
+            if (groupId && user) {
+                SettlementService.calculateBalance(groupId, user.id)
+                    .then(bals => setBalances(bals))
+                    .catch(err => console.error('Failed to refresh balance after settle', err));
+            }
+        };
+        window.addEventListener('settle-complete', onSettle);
+        return () => window.removeEventListener('settle-complete', onSettle);
+    }, [groupId, user]);
+
     const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
     const handleDelete = async () => {
