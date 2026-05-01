@@ -94,7 +94,7 @@ export const SettlementService = {
         });
 
         // ─────────────────────────────────────────────────────────────────────
-        // WHY WE CLEAR GROSS, NOT NET
+        // WHY WE CLEAR GROSS, NOT NET (direct pair case)
         //
         // calculateGroupSettlements already nets mutual debts.
         // Example: Bilal owes Alfaiz ₹100 gross, Alfaiz owes Bilal ₹30 gross.
@@ -119,13 +119,15 @@ export const SettlementService = {
         );
         const creditorExpenseIds = (creditorExpenses as any[] || []).map((e: any) => e.id);
 
+        let directSplitsCleared = 0;
         if (creditorExpenseIds.length > 0) {
             const idsStr = `(${creditorExpenseIds.join(',')})`;
-            await dbUpdate(
+            const cleared = await dbUpdate(
                 'expense_splits',
                 `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
                 { is_settled: true, settled_at: settledAt }
             );
+            directSplitsCleared = (cleared as any[] || []).length;
         }
 
         // 2b. Clear ALL of creditor's unsettled reverse splits on debtor's expenses (gross)
@@ -144,6 +146,83 @@ export const SettlementService = {
                 `user_id=eq.${creditorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
                 { is_settled: true, settled_at: settledAt }
             );
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // CHAIN FALLBACK
+        //
+        // The minimized (greedy) algorithm can route A→C through a debt chain:
+        //   A owes B ₹25  +  B owes C ₹4530  →  minimizer emits A→C ₹25
+        //
+        // When C clicks Settle on "A owes you ₹25", Step 2a finds zero direct
+        // splits (A has no splits on C's expenses) → directSplitsCleared === 0.
+        //
+        // Correct chain resolution:
+        //   1. Find the REAL creditor B that A actually owes via raw pairwise data.
+        //   2. Clear A's splits on B's expenses (marks A→B as settled, gross).
+        //   3. Offset: reduce B's debt to C by the same ₹25 — mark B's oldest
+        //      split(s) on C's expenses as settled, up to `amount` budget.
+        //      (Do NOT clear all of B's debt to C — only the proxy portion.)
+        // ─────────────────────────────────────────────────────────────────────
+        if (directSplitsCleared === 0) {
+            // Step C1: get the raw pairwise graph to find who debtor really owes.
+            // calculateGroupSettlements doesn't use the members[] array internally,
+            // so passing [] is safe here.
+            const rawPairs = await SettlementService.calculateGroupSettlements(groupId, []);
+            const intermediatePair = rawPairs.find(
+                (p: { from: string; to: string; amount: number }) => p.from === debtorId
+            );
+
+            if (intermediatePair) {
+                const intermediateCreditorId = intermediatePair.to;
+
+                // Step C2: clear ALL of debtor's splits on intermediate creditor's expenses
+                const intermediateExpenses = await dbQuery(
+                    'expenses',
+                    `added_by=eq.${intermediateCreditorId}&group_id=eq.${groupId}&select=id`
+                );
+                const intermediateExpenseIds = (intermediateExpenses as any[] || []).map((e: any) => e.id);
+
+                if (intermediateExpenseIds.length > 0) {
+                    const idsStr = `(${intermediateExpenseIds.join(',')})`;
+                    await dbUpdate(
+                        'expense_splits',
+                        `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
+                        { is_settled: true, settled_at: settledAt }
+                    );
+                }
+
+                // Step C3: offset — mark intermediate creditor's oldest split(s) on
+                // final creditor's expenses as settled, up to the chain `amount` budget.
+                // We iterate oldest-first and mark splits until the budget is consumed,
+                // so we don't over-clear B's remaining large debt to C.
+                if (creditorExpenseIds.length > 0) {
+                    const idsStr = `(${creditorExpenseIds.join(',')})`;
+                    const pendingSplits = await dbQuery(
+                        'expense_splits',
+                        `user_id=eq.${intermediateCreditorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed&order=expense_id.asc`
+                    );
+
+                    let budgetCents = Math.round(amount * 100);
+                    for (const split of (pendingSplits as any[] || [])) {
+                        if (budgetCents <= 0) break;
+                        const splitAmountCents = Math.round(Number(split.amount_owed) * 100);
+                        if (splitAmountCents <= budgetCents) {
+                            // This split fits entirely within budget — mark settled
+                            await dbUpdate(
+                                'expense_splits',
+                                `id=eq.${split.id}&is_settled=eq.false`,
+                                { is_settled: true, settled_at: settledAt }
+                            );
+                            budgetCents -= splitAmountCents;
+                        } else {
+                            // Split is larger than remaining budget — stop here.
+                            // Partial split marking is not supported (no split-the-split).
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         return true;

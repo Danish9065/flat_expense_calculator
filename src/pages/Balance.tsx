@@ -258,21 +258,17 @@ export default function Balance() {
                                             <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
                                         {isCreditor ? (() => {
-                                                // Bug B Fix: use the RAW pairwise amount, not the minimized consolidated amount.
-                                                // The minimized amount may span multiple creditors (e.g. Adnan→Danish ₹4195
-                                                // absorbs Adnan→Yazz ₹112), but settleUp() only clears this specific pair.
-                                                // Using the raw pair amount ensures the settlement record matches exactly
-                                                // what was bilaterally agreed, and the remaining cross-pair debt stays for
-                                                // the other creditor to settle separately.
+                                                // Use the raw pairwise amount when a direct pair exists
+                                                // (preserves mutual-debt netting). For chain-routed rows
+                                                // (no direct raw pair), pass the minimized amount —
+                                                // settleUp() will resolve the chain internally.
                                                 const rawPair = settlements.find(
                                                     (r: any) => r.from === s.from && r.to === s.to
                                                 );
-                                                const settlePayload = rawPair
-                                                    ? { ...s, amount: rawPair.amount }
-                                                    : s; // fallback: use minimized amount if no raw pair found
+                                                const settleAmount = rawPair ? rawPair.amount : s.amount;
                                                 return (
                                                     <button
-                                                        onClick={() => handleSettleUp(settlePayload)}
+                                                        onClick={() => handleSettleUp({ ...s, amount: settleAmount })}
                                                         disabled={isSettlingNow}
                                                         className="bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                                                     >
