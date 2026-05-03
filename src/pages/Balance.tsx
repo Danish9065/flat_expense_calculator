@@ -355,14 +355,7 @@ export default function Balance() {
                                             <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
                                         {isCreditor ? (() => {
-                                                // Use the raw pairwise amount when a direct pair exists
-                                                // (preserves mutual-debt netting). For chain-routed rows
-                                                // (no direct raw pair), pass the minimized amount —
-                                                // settleUp() will resolve the chain internally.
-                                                const rawPair = settlements.find(
-                                                    (r: any) => r.from === s.from && r.to === s.to
-                                                );
-                                                const settleAmount = rawPair ? rawPair.amount : s.amount;
+                                                const settleAmount = s.amount;
                                                 const isCardSettling = settlingCard === settlingKey;
                                                 return isCardSettling ? null : (
                                                     <button
@@ -386,10 +379,7 @@ export default function Balance() {
 
                                 {/* Inline partial-payment modal (minimized section) */}
                                 {settlingCard === settlingKey && isCreditor && (() => {
-                                    const rawPair = settlements.find(
-                                        (r: any) => r.from === s.from && r.to === s.to
-                                    );
-                                    const settleAmount = rawPair ? rawPair.amount : s.amount;
+                                    const settleAmount = s.amount;
                                     return renderSettleModal(s.from, s.to, settleAmount);
                                 })()}
 
