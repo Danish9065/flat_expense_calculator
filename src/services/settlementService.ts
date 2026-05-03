@@ -1,4 +1,4 @@
-import { dbQuery, dbInsert, dbUpdate } from '../lib/db';
+import insforge, { dbQuery, dbInsert, dbUpdate } from '../lib/db';
 
 export const SettlementService = {
     /**
@@ -197,12 +197,17 @@ export const SettlementService = {
                 const intermediateExpenseIds = (intermediateExpenses as any[] || []).map((e: any) => e.id);
 
                 if (intermediateExpenseIds.length > 0) {
-                    const idsStr = `(${intermediateExpenseIds.join(',')})`;
-                    const splitsToClear = await dbQuery(
-                        'expense_splits',
-                        `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
-                    );
-                    for (const split of (splitsToClear as any[] || [])) {
+                    const { data: splitsToClear, error } = await insforge.database
+                        .from('expense_splits')
+                        .select('id, amount_owed')
+                        .eq('user_id', debtorId)
+                        .eq('is_settled', false)
+                        .in('expense_id', intermediateExpenseIds)
+                        .order('expense_id', { ascending: true });
+
+                    if (error) throw new Error(error.message);
+
+                    for (const split of (splitsToClear || [])) {
                         await dbUpdate(
                             'expense_splits',
                             `id=eq.${split.id}`,
@@ -254,12 +259,16 @@ export const SettlementService = {
         // ── Step 2: Fetch debtor's unsettled splits on creditor's expenses (oldest first) ────
         let directSplits: any[] = [];
         if (creditorExpenseIds.length > 0) {
-            const idsStr = `(${creditorExpenseIds.join(',')})`;
-            const result = await dbQuery(
-                'expense_splits',
-                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed,amount_paid&order=created_at.asc`
-            );
-            directSplits = (result as any[] || []);
+            const { data, error } = await insforge.database
+                .from('expense_splits')
+                .select('id, amount_owed, amount_paid')
+                .eq('user_id', debtorId)
+                .eq('is_settled', false)
+                .in('expense_id', creditorExpenseIds)
+                .order('expense_id', { ascending: true });
+
+            if (error) throw new Error(error.message);
+            directSplits = data || [];
         }
 
         // ── Step 3: Walk splits, mark settled up to budget (oldest first) ─────
