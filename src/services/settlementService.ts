@@ -192,36 +192,10 @@ export const SettlementService = {
                     );
                 }
 
-                // Step C3: offset — mark intermediate creditor's oldest split(s) on
-                // final creditor's expenses as settled, up to the chain `amount` budget.
-                // We iterate oldest-first and mark splits until the budget is consumed,
-                // so we don't over-clear B's remaining large debt to C.
-                if (creditorExpenseIds.length > 0) {
-                    const idsStr = `(${creditorExpenseIds.join(',')})`;
-                    const pendingSplits = await dbQuery(
-                        'expense_splits',
-                        `user_id=eq.${intermediateCreditorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed&order=created_at.asc`
-                    );
-
-                    let budgetCents = Math.round(amount * 100);
-                    for (const split of (pendingSplits as any[] || [])) {
-                        if (budgetCents <= 0) break;
-                        const splitAmountCents = Math.round(Number(split.amount_owed) * 100);
-                        if (splitAmountCents <= budgetCents) {
-                            // This split fits entirely within budget — mark settled
-                            await dbUpdate(
-                                'expense_splits',
-                                `id=eq.${split.id}&is_settled=eq.false`,
-                                { is_settled: true, settled_at: settledAt }
-                            );
-                            budgetCents -= splitAmountCents;
-                        } else {
-                            // Split is larger than remaining budget — stop here.
-                            // Partial split marking is not supported (no split-the-split).
-                            break;
-                        }
-                    }
-                }
+                // ❌ REMOVE Step C3 entirely — do NOT touch intermediate creditor's splits on final creditor's expenses
+                // Reason: The intermediate creditor hasn't paid the final creditor anything. Clearing their splits without
+                // their confirmation corrupts their balance. calculateGroupSettlements will automatically net out
+                // the cleared split from the intermediate creditor's gross debt to the final creditor.
             }
         }
 
