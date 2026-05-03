@@ -228,6 +228,129 @@ export const SettlementService = {
         return true;
     },
 
+    /**
+     * Settle Up Partial: pays a portion of what debtor owes creditor.
+     *
+     * Design principle (splits are atomic — no half-splits):
+     *  1. Fetch debtor's unsettled splits on creditor's expenses, oldest first.
+     *  2. Walk splits greedily: mark settled while split ≤ remaining budget.
+     *     Skip any split that would exceed the remaining budget (do NOT partially mark it).
+     *  3. Insert a settlements record with is_partial = true (or false if fully cleared).
+     *  4. Handle reverse splits (creditor's splits on debtor's expenses) with the same
+     *     budget, since calculateGroupSettlements already nets mutual debts.
+     *
+     * @returns { settled, remaining } — actual cash settled and balance left
+     */
+    async settleUpPartial(
+        groupId: string,
+        debtorId: string,
+        creditorId: string,
+        partialAmountCents: number
+    ): Promise<{ settled: number; remaining: number }> {
+        if (debtorId === creditorId) throw new Error('Debtor and creditor cannot be the same person');
+
+        const settledAt = new Date().toISOString();
+
+        // ── Step 1: Fetch creditor's expense IDs ──────────────────────────────
+        const creditorExpenses = await dbQuery(
+            'expenses',
+            `added_by=eq.${creditorId}&group_id=eq.${groupId}&select=id`
+        );
+        const creditorExpenseIds = (creditorExpenses as any[] || []).map((e: any) => e.id);
+
+        // ── Step 2: Fetch debtor's unsettled splits on creditor's expenses ────
+        let directSplits: any[] = [];
+        if (creditorExpenseIds.length > 0) {
+            const idsStr = `(${creditorExpenseIds.join(',')})`;
+            const result = await dbQuery(
+                'expense_splits',
+                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed&order=expense_id.asc`
+            );
+            directSplits = (result as any[] || []);
+        }
+
+        // ── Step 3: Walk splits, mark settled up to budget (oldest first) ─────
+        let budgetRemaining = partialAmountCents;
+        const toSettleDirect: string[] = [];
+        const totalDirectCents = directSplits.reduce((s, x) => s + Math.round(Number(x.amount_owed) * 100), 0);
+
+        for (const split of directSplits) {
+            const splitCents = Math.round(Number(split.amount_owed) * 100);
+            if (splitCents <= budgetRemaining) {
+                toSettleDirect.push(split.id);
+                budgetRemaining -= splitCents;
+            }
+            // If split > remaining budget: skip (atomic — no partial split marking)
+        }
+
+        if (toSettleDirect.length > 0) {
+            const idsStr = `(${toSettleDirect.join(',')})`;
+            await dbUpdate(
+                'expense_splits',
+                `id=in.${idsStr}&is_settled=eq.false`,
+                { is_settled: true, settled_at: settledAt }
+            );
+        }
+
+        // ── Step 4: Handle reverse splits (creditor's splits on debtor's expenses) ──
+        // These represent mutual debts already netted into the displayed amount.
+        // Clear them up to a separate budget (same initial amount) to mirror settleUp().
+        const debtorExpenses = await dbQuery(
+            'expenses',
+            `added_by=eq.${debtorId}&group_id=eq.${groupId}&select=id`
+        );
+        const debtorExpenseIds = (debtorExpenses as any[] || []).map((e: any) => e.id);
+
+        if (debtorExpenseIds.length > 0) {
+            const idsStr = `(${debtorExpenseIds.join(',')})`;
+            const reverseSplits = await dbQuery(
+                'expense_splits',
+                `user_id=eq.${creditorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed&order=expense_id.asc`
+            );
+            let reverseBudget = partialAmountCents;
+            const toSettleReverse: string[] = [];
+            for (const split of (reverseSplits as any[] || [])) {
+                const splitCents = Math.round(Number(split.amount_owed) * 100);
+                if (splitCents <= reverseBudget) {
+                    toSettleReverse.push(split.id);
+                    reverseBudget -= splitCents;
+                }
+            }
+            if (toSettleReverse.length > 0) {
+                const reverseIdsStr = `(${toSettleReverse.join(',')})`;
+                await dbUpdate(
+                    'expense_splits',
+                    `id=in.${reverseIdsStr}&is_settled=eq.false`,
+                    { is_settled: true, settled_at: settledAt }
+                );
+            }
+        }
+
+        // ── Step 5: Compute how much was actually "consumed" by splits ────────
+        // (partialAmountCents - budgetRemaining = cents worth of splits marked settled)
+        const settledSplitsCents = partialAmountCents - budgetRemaining;
+
+        // ── Step 6: Determine if this is a full or partial settlement ─────────
+        const isPartial = totalDirectCents - settledSplitsCents > 1; // >1 cent remaining
+
+        // ── Step 7: Record the cash payment in settlements table ──────────────
+        await dbInsert('settlements', {
+            group_id: groupId,
+            paid_by: debtorId,
+            paid_to: creditorId,
+            amount: partialAmountCents / 100,
+            is_partial: isPartial,
+            settled_at: settledAt,
+        });
+
+        const remaining = Math.max(0, (totalDirectCents - settledSplitsCents) / 100);
+
+        return {
+            settled: partialAmountCents / 100,
+            remaining,
+        };
+    },
+
 
     /**
      * Calculate who owes whom in the group using DIRECT PER-PAIR net balances.
