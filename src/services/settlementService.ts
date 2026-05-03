@@ -1,243 +1,87 @@
-import insforge, { dbQuery, dbInsert, dbUpdate } from '../lib/db';
+import insforge, { dbQuery, dbInsert } from '../lib/db';
 
 export const SettlementService = {
     /**
      * Calculate the net balance for a single user in a group.
-     *
-     * Filters to only UNSETTLED splits (is_settled=eq.false) so that
-     * confirmed settlements are immediately excluded from the balance.
-     *
-     * net > 0 → others owe this user (creditor)
-     * net < 0 → this user owes others (debtor)
      */
     async calculateBalance(groupId: string, userId: string): Promise<{ totalPaid: number; totalOwed: number; netBalance: number }> {
-        // Step 1: Fetch all expenses for this group with their payer
-        const groupExpenses = await dbQuery('expenses', `group_id=eq.${groupId}&select=id,added_by,amount`);
-        if (!groupExpenses || groupExpenses.length === 0) {
-            return { totalPaid: 0, totalOwed: 0, netBalance: 0 };
+        // Step 1: Get all expenses
+        const { data: expenses, error: expensesError } = await insforge.database
+            .from('expenses')
+            .select('id, added_by, amount')
+            .eq('group_id', groupId);
+
+        if (expensesError) throw new Error(expensesError.message);
+
+        const expenseIds = (expenses || []).map((e: any) => e.id);
+
+        // Step 2: Get all expense splits
+        let splits: any[] = [];
+        if (expenseIds.length > 0) {
+            const { data: splitsData, error: splitsError } = await insforge.database
+                .from('expense_splits')
+                .select('user_id, amount_owed')
+                .in('expense_id', expenseIds);
+            
+            if (splitsError) throw new Error(splitsError.message);
+            splits = splitsData || [];
         }
 
-        // Build expenseId → added_by map
-        const expenseCreditorMap: Record<string, string> = {};
-        for (const exp of groupExpenses as any[]) {
-            expenseCreditorMap[exp.id] = exp.added_by;
-        }
+        // Step 3: Get all settlements
+        const { data: settlements, error: settlementsError } = await insforge.database
+            .from('settlements')
+            .select('paid_by, paid_to, amount')
+            .eq('group_id', groupId);
+            
+        if (settlementsError) throw new Error(settlementsError.message);
 
-        const expenseIds = (groupExpenses as any[]).map((e: any) => e.id);
-        const expenseIdsStr = `(${expenseIds.join(',')})`;
+        let netBalance = 0;
 
-        // Step 2: Fetch only UNSETTLED splits — excludes splits already confirmed as settled.
-        // IMPORTANT: Both totalOwed and realOwedToMe must come from the SAME unsettled-splits
-        // dataset so that after a settlement both sides of the equation drop together.
-        // Previously totalPaid was derived from raw expense amounts (never updated after settling)
-        // causing netBalance to stay stale even when all splits were cleared.
-        const splits = await dbQuery(
-            'expense_splits',
-            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,amount_paid,user_id,expense_id`
-        );
-
-        let totalOwed = 0;      // what this user still owes others (unsettled)
-        let realOwedToMe = 0;   // what others still owe this user (unsettled)
-
-        (splits as any[] || []).forEach((split: any) => {
-            const debtor = split.user_id;
-            const creditor = expenseCreditorMap[split.expense_id];
-            const amount = Number(split.amount_owed) - Number(split.amount_paid ?? 0);
-
-            // Skip self-owed splits (payer's own share cancels out)
-            if (amount > 0 && debtor !== creditor) {
-                if (debtor === userId) totalOwed += amount;
-                if (creditor === userId) realOwedToMe += amount;
+        for (const exp of expenses || []) {
+            if (exp.added_by === userId) {
+                netBalance += Number(exp.amount);
             }
-        });
+        }
 
-        // totalPaid reflects the gross amount the user has covered for others that
-        // is still unsettled. Use realOwedToMe as the "pending receivable" so the
-        // Dashboard widget immediately drops to ₹0 once all splits are settled.
-        const netBalance = Math.round((realOwedToMe - totalOwed) * 100) / 100;
+        for (const split of splits) {
+            if (split.user_id === userId) {
+                netBalance -= Number(split.amount_owed);
+            }
+        }
+
+        for (const s of settlements || []) {
+            if (s.paid_by === userId) netBalance += Number(s.amount);
+            if (s.paid_to === userId) netBalance -= Number(s.amount);
+        }
 
         return {
-            totalPaid: Math.round(realOwedToMe * 100) / 100,   // unsettled receivable (not raw total)
-            totalOwed: Math.round(totalOwed * 100) / 100,
-            netBalance,
+            totalPaid: 0,
+            totalOwed: 0,
+            netBalance: Math.round(netBalance * 100) / 100,
         };
     },
 
     /**
-     * Settle Up: records a payment from debtor → creditor and marks only the
-     * MINIMUM SET of splits (oldest first) needed to cover the settled amount.
-     *
-     * BUG 1 FIX: Previously ALL splits were bulk-marked settled, which wiped
-     * remaining balances when a payment was partial. Now splits are settled
-     * one by one (sorted by expense created_at ASC) until the amount is consumed.
-     * Any splits beyond the settled amount remain is_settled=false.
-     *
-     * Also handles the reverse direction: if debtor is also a creditor for the
-     * other person, those reverse splits are similarly settled up to their total
-     * (since the greedy algorithm already netted them into the settlement amount).
-     *
-     * @param groupId    - the group
-     * @param debtorId   - person who owes (s.from / paidBy)
-     * @param creditorId - person who is owed (s.to / paidTo)
-     * @param amount     - net amount being settled
+     * Settle Up: simply records a payment from debtor → creditor.
+     * Balance recalculation handles the state.
      */
     async settleUp(groupId: string, debtorId: string, creditorId: string, amount: number) {
-        // Guard: only the debtor should be able to call this — if IDs are the same something is wrong
         if (debtorId === creditorId) throw new Error('Debtor and creditor cannot be the same person');
 
-        // 1. INSERT a settlement record (net cash transfer for audit trail / CSV export)
         await dbInsert('settlements', {
             group_id: groupId,
             paid_by: debtorId,
             paid_to: creditorId,
-            amount: amount
+            amount: amount,
+            settled_at: new Date().toISOString(),
+            is_partial: false
         });
-
-        // ─────────────────────────────────────────────────────────────────────
-        // WHY WE CLEAR GROSS, NOT NET (direct pair case)
-        //
-        // calculateGroupSettlements already nets mutual debts.
-        // Example: Bilal owes Alfaiz ₹100 gross, Alfaiz owes Bilal ₹30 gross.
-        //   → displayed net: Bilal pays Alfaiz ₹70.
-        //
-        // The CORRECT way to close the books is:
-        //   Step 2a: mark ALL of Bilal's ₹100 splits on Alfaiz's expenses settled
-        //   Step 2b: mark ALL of Alfaiz's ₹30 splits on Bilal's expenses settled
-        //   Record:  amount = ₹70 (actual cash handed over)
-        //
-        // Using the net ₹70 as a budget for step 2a causes "ghost balances":
-        //   if Bilal's single split = ₹100 > budget ₹70 → SKIP → ₹100 unsettled
-        //   After: calculateGroupSettlements still sees Bilal owes Alfaiz ₹100!
-        // ─────────────────────────────────────────────────────────────────────
-
-        const settledAt = new Date().toISOString();
-
-        // 2a. Clear ALL of debtor's unsettled splits on creditor's expenses (gross)
-        const creditorExpenses = await dbQuery(
-            'expenses',
-            `added_by=eq.${creditorId}&group_id=eq.${groupId}&select=id`
-        );
-        const creditorExpenseIds = (creditorExpenses as any[] || []).map((e: any) => e.id);
-
-        let directSplitsCleared = 0;
-        if (creditorExpenseIds.length > 0) {
-            const idsStr = `(${creditorExpenseIds.join(',')})`;
-            const splitsToClear = await dbQuery(
-                'expense_splits',
-                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
-            );
-            
-            for (const split of (splitsToClear as any[] || [])) {
-                await dbUpdate(
-                    'expense_splits',
-                    `id=eq.${split.id}`,
-                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
-                );
-            }
-            directSplitsCleared = (splitsToClear as any[] || []).length;
-        }
-
-        // 2b. Clear ALL of creditor's unsettled reverse splits on debtor's expenses (gross)
-        //     These represent the mutual debt already netted into the settlement amount.
-        //     Clearing them prevents ghost credits re-appearing after the net payment.
-        const debtorExpenses = await dbQuery(
-            'expenses',
-            `added_by=eq.${debtorId}&group_id=eq.${groupId}&select=id`
-        );
-        const debtorExpenseIds = (debtorExpenses as any[] || []).map((e: any) => e.id);
-
-        if (debtorExpenseIds.length > 0) {
-            const idsStr = `(${debtorExpenseIds.join(',')})`;
-            const splitsToClear = await dbQuery(
-                'expense_splits',
-                `user_id=eq.${creditorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
-            );
-            for (const split of (splitsToClear as any[] || [])) {
-                await dbUpdate(
-                    'expense_splits',
-                    `id=eq.${split.id}`,
-                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
-                );
-            }
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // CHAIN FALLBACK
-        //
-        // The minimized (greedy) algorithm can route A→C through a debt chain:
-        //   A owes B ₹25  +  B owes C ₹4530  →  minimizer emits A→C ₹25
-        //
-        // When C clicks Settle on "A owes you ₹25", Step 2a finds zero direct
-        // splits (A has no splits on C's expenses) → directSplitsCleared === 0.
-        //
-        // Correct chain resolution:
-        //   1. Find the REAL creditor B that A actually owes via raw pairwise data.
-        //   2. Clear A's splits on B's expenses (marks A→B as settled, gross).
-        //   3. Offset: reduce B's debt to C by the same ₹25 — mark B's oldest
-        //      split(s) on C's expenses as settled, up to `amount` budget.
-        //      (Do NOT clear all of B's debt to C — only the proxy portion.)
-        // ─────────────────────────────────────────────────────────────────────
-        if (directSplitsCleared === 0) {
-            // Step C1: get the raw pairwise graph to find who debtor really owes.
-            // calculateGroupSettlements doesn't use the members[] array internally,
-            // so passing [] is safe here.
-            const rawPairs = await SettlementService.calculateGroupSettlements(groupId, []);
-            const intermediatePair = rawPairs.find(
-                (p: { from: string; to: string; amount: number }) => p.from === debtorId
-            );
-
-            if (intermediatePair) {
-                const intermediateCreditorId = intermediatePair.to;
-
-                // Step C2: clear ALL of debtor's splits on intermediate creditor's expenses
-                const intermediateExpenses = await dbQuery(
-                    'expenses',
-                    `added_by=eq.${intermediateCreditorId}&group_id=eq.${groupId}&select=id`
-                );
-                const intermediateExpenseIds = (intermediateExpenses as any[] || []).map((e: any) => e.id);
-
-                if (intermediateExpenseIds.length > 0) {
-                    const { data: splitsToClear, error } = await insforge.database
-                        .from('expense_splits')
-                        .select('id, amount_owed')
-                        .eq('user_id', debtorId)
-                        .eq('is_settled', false)
-                        .in('expense_id', intermediateExpenseIds)
-                        .order('expense_id', { ascending: true });
-
-                    if (error) throw new Error(error.message);
-
-                    for (const split of (splitsToClear || [])) {
-                        await dbUpdate(
-                            'expense_splits',
-                            `id=eq.${split.id}`,
-                            { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
-                        );
-                    }
-                }
-
-                // ❌ REMOVE Step C3 entirely — do NOT touch intermediate creditor's splits on final creditor's expenses
-                // Reason: The intermediate creditor hasn't paid the final creditor anything. Clearing their splits without
-                // their confirmation corrupts their balance. calculateGroupSettlements will automatically net out
-                // the cleared split from the intermediate creditor's gross debt to the final creditor.
-            }
-        }
 
         return true;
     },
 
     /**
-     * Settle Up Partial: pays a portion of what debtor owes creditor.
-     *
-     * Design principle (splits are atomic — no half-splits):
-     *  1. Fetch debtor's unsettled splits on creditor's expenses, oldest first.
-     *  2. Walk splits greedily: mark settled while split ≤ remaining budget.
-     *     Skip any split that would exceed the remaining budget (do NOT partially mark it).
-     *  3. Insert a settlements record with is_partial = true (or false if fully cleared).
-     *  4. Handle reverse splits (creditor's splits on debtor's expenses) with the same
-     *     budget, since calculateGroupSettlements already nets mutual debts.
-     *
-     * @returns { settled, remaining } — actual cash settled and balance left
+     * Settle Up Partial: simply records a partial payment from debtor → creditor.
      */
     async settleUpPartial(
         groupId: string,
@@ -247,242 +91,25 @@ export const SettlementService = {
     ): Promise<{ settled: number; remaining: number }> {
         if (debtorId === creditorId) throw new Error('Debtor and creditor cannot be the same person');
 
-        const settledAt = new Date().toISOString();
-
-        // ── Step 1: Fetch creditor's expense IDs ──────────────────────────────
-        const creditorExpenses = await dbQuery(
-            'expenses',
-            `added_by=eq.${creditorId}&group_id=eq.${groupId}&select=id`
-        );
-        const creditorExpenseIds = (creditorExpenses as any[] || []).map((e: any) => e.id);
-
-        // ── Step 2: Fetch debtor's unsettled splits on creditor's expenses (oldest first) ────
-        let directSplits: any[] = [];
-        if (creditorExpenseIds.length > 0) {
-            const { data, error } = await insforge.database
-                .from('expense_splits')
-                .select('id, amount_owed, amount_paid')
-                .eq('user_id', debtorId)
-                .eq('is_settled', false)
-                .in('expense_id', creditorExpenseIds)
-                .order('expense_id', { ascending: true });
-
-            if (error) throw new Error(error.message);
-            directSplits = data || [];
-        }
-
-        // ── Step 3: Walk splits, mark settled up to budget (oldest first) ─────
-        let budgetRemainingCents = partialAmountCents;
-        const totalDirectCents = directSplits.reduce((s, x) => {
-            const stillOwed = Math.round(Number(x.amount_owed) * 100) - Math.round(Number(x.amount_paid ?? 0) * 100);
-            return s + Math.max(0, stillOwed);
-        }, 0);
-
-        for (const split of directSplits) {
-            if (budgetRemainingCents <= 0) break;
-
-            const alreadyPaidCents = Math.round(Number(split.amount_paid ?? 0) * 100);
-            const amountOwedCents = Math.round(Number(split.amount_owed) * 100);
-            const stillOwedCents = amountOwedCents - alreadyPaidCents;
-
-            if (stillOwedCents <= 0) continue; // already fully paid, skip
-
-            if (stillOwedCents <= budgetRemainingCents) {
-                // Full split can be cleared
-                await dbUpdate(
-                    'expense_splits',
-                    `id=eq.${split.id}`,
-                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
-                );
-                budgetRemainingCents -= stillOwedCents;
-            } else {
-                // Partial: apply remaining budget to this split, don't mark settled
-                const newAmountPaidCents = alreadyPaidCents + budgetRemainingCents;
-                await dbUpdate(
-                    'expense_splits',
-                    `id=eq.${split.id}`,
-                    { amount_paid: newAmountPaidCents / 100 }
-                );
-                budgetRemainingCents = 0;
-            }
-        }
-
-        // ── Step 4: NOT clearing reverse splits for partial payments ─────────
-        //
-        // Unlike settleUp() (full payment), we intentionally leave the creditor's
-        // reverse splits on the debtor's expenses UNTOUCHED.
-        //
-        // Why: calculateGroupSettlements nets mutual debts per pair.
-        //   gross(Yazz→Danish) − gross(Danish→Yazz) = net shown in UI
-        //
-        // For a FULL payment, clearing both sides zeroes the net correctly.
-        // For a PARTIAL payment, clearing reverse splits double-subtracts:
-        //   net_after = (gross_direct − cleared_direct) − (gross_reverse − cleared_reverse)
-        //             = net_before − cleared_direct − cleared_reverse   ← TOO MUCH subtracted
-        //
-        // Correct partial behavior: only reduce the direct side.
-        //   net_after = (gross_direct − cleared_direct) − gross_reverse
-        //             = net_before − cleared_direct                     ← correct
-
-        // ── Step 5: Determine if this is a full or partial settlement ─────────
-        const settledSplitsCents = partialAmountCents - budgetRemainingCents;
-        const isPartial = totalDirectCents - settledSplitsCents > 1; // >1 cent remaining
-
-        // ── Step 6: Record the cash payment in settlements table ──────────────
         await dbInsert('settlements', {
             group_id: groupId,
             paid_by: debtorId,
             paid_to: creditorId,
             amount: partialAmountCents / 100,
-            is_partial: isPartial,
-            settled_at: settledAt,
+            settled_at: new Date().toISOString(),
+            is_partial: true
         });
-
-        const remaining = Math.max(0, (totalDirectCents - settledSplitsCents) / 100);
 
         return {
             settled: partialAmountCents / 100,
-            remaining,
+            remaining: 0,
         };
     },
 
-
     /**
-     * Calculate who owes whom in the group using DIRECT PER-PAIR net balances.
-     *
-     * BUG 2 FIX: The previous greedy algorithm collapsed per-pair debts into a
-     * single creditor per debtor (minimizing total transactions). This caused
-     * "Alfaiz owes Yazz ₹61.66" and "Alfaiz owes Danish ₹83.33" to be merged
-     * and attributed to just one creditor (whichever had the larger net balance).
-     *
-     * The new approach:
-     *  1. Compute net(A→B) = what A owes B (unsettled) minus what B owes A (unsettled)
-     *  2. If net > 0: emit a row "A owes B net_amount"
-     *  3. This correctly shows SEPARATE rows per creditor, preserving the true
-     *     per-person relationships that match the CSV export.
-     *
-     * Algorithm:
-     *  For each ordered pair (debtor, creditor):
-     *    gross_A_owes_B = sum of unsettled splits where user_id=A and expense.added_by=B
-     *    gross_B_owes_A = sum of unsettled splits where user_id=B and expense.added_by=A
-     *    net = gross_A_owes_B - gross_B_owes_A
-     *    if net > 0.01: add { from: A, to: B, amount: net }
+     * Compute minimized transactions based on flat net balance.
      */
-    async calculateGroupSettlements(groupId: string, members: any[], categoryFilter?: string) {
-        // Step 1: Fetch all expense IDs for this group (optionally filtered by category)
-        let expQuery = `group_id=eq.${groupId}&select=id,added_by`;
-        if (categoryFilter && categoryFilter !== 'All') expQuery += `&category=eq.${categoryFilter}`;
-        const groupExpenses = await dbQuery('expenses', expQuery);
-
-        if (!groupExpenses || (groupExpenses as any[]).length === 0) return [];
-
-        // Build creditor map: expenseId → added_by (the payer / creditor)
-        const expenseCreditorMap: Record<string, string> = {};
-        for (const exp of groupExpenses as any[]) {
-            expenseCreditorMap[exp.id] = exp.added_by;
-        }
-
-        const expenseIds = (groupExpenses as any[]).map((e: any) => e.id);
-        const expenseIdsStr = `(${expenseIds.join(',')})`;
-
-        // Step 2: Fetch only UNSETTLED splits — excludes splits already confirmed as settled
-        const splits = await dbQuery(
-            'expense_splits',
-            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,amount_paid,user_id,expense_id`
-        );
-
-        // Step 3: BUG 2 FIX — Build per-pair gross balances (in integer cents, no float drift)
-        // pairOwed[A][B] = how much A owes B (gross, in cents)
-        const pairOwedCents: Record<string, Record<string, number>> = {};
-
-        const ensurePair = (a: string, b: string) => {
-            if (!pairOwedCents[a]) pairOwedCents[a] = {};
-            if (!pairOwedCents[a][b]) pairOwedCents[a][b] = 0;
-        };
-
-        (splits as any[] || []).forEach((split: any) => {
-            const debtor = split.user_id;
-            const creditor = expenseCreditorMap[split.expense_id];
-            if (!debtor || !creditor || debtor === creditor) return; // skip self-splits
-
-            const remainingOwed = Number(split.amount_owed) - Number(split.amount_paid ?? 0);
-            if (remainingOwed > 0) {
-                const amountCents = Math.round(remainingOwed * 100);
-                ensurePair(debtor, creditor);
-                pairOwedCents[debtor][creditor] += amountCents;
-            }
-        });
-
-        // Step 4: For each ordered pair (A, B), compute net = A_owes_B - B_owes_A
-        // Only emit a settlement row if net > 1 cent
-        const settlements: { from: string; to: string; amount: number }[] = [];
-        const emittedPairs = new Set<string>(); // prevent double-counting A→B and B→A
-
-        for (const debtor of Object.keys(pairOwedCents)) {
-            for (const creditor of Object.keys(pairOwedCents[debtor])) {
-                const pairKey = [debtor, creditor].sort().join('__');
-                if (emittedPairs.has(pairKey)) continue;
-                emittedPairs.add(pairKey);
-
-                const aOwesB = pairOwedCents[debtor]?.[creditor] ?? 0;
-                const bOwesA = pairOwedCents[creditor]?.[debtor] ?? 0;
-
-                const netCents = aOwesB - bOwesA;
-
-                if (netCents > 1) {
-                    // debtor owes creditor net amount
-                    settlements.push({
-                        from: debtor,
-                        to: creditor,
-                        amount: Math.round(netCents) / 100,
-                    });
-                } else if (netCents < -1) {
-                    // creditor owes debtor net amount (reverse direction)
-                    settlements.push({
-                        from: creditor,
-                        to: debtor,
-                        amount: Math.round(Math.abs(netCents)) / 100,
-                    });
-                }
-            }
-        }
-
-        // Sort by amount descending for consistent display
-        settlements.sort((a, b) => b.amount - a.amount);
-
-        return settlements;
-    },
-
-    /**
-     * Debt-Minimization Algorithm (Greedy)
-     *
-     * Takes the raw pairwise net balances produced by calculateGroupSettlements
-     * and reduces them to the MINIMUM number of transactions needed to clear all debts.
-     *
-     * Step 1: Compute a single net position per person across all pairs.
-     *   netBalance[person] = (total owed to them) - (total they owe)
-     *   positive → creditor (others owe them)
-     *   negative → debtor   (they owe others)
-     *
-     * Step 2: Greedily pair the largest debtor with the largest creditor,
-     *   settle the minimum of their magnitudes, advance whichever hits zero.
-     *
-     * @param rawNetBalances - output of calculateGroupSettlements ({ from, to, amount }[])
-     * @returns minimized list: { from, to, amount }[]
-     */
-    calculateMinimizedSettlements(
-        rawNetBalances: { from: string; to: string; amount: number }[]
-    ): { from: string; to: string; amount: number }[] {
-        // Step 1: collapse all pairs into a single net position per person
-        const net: Record<string, number> = {};
-        for (const { from: debtor, to: creditor, amount } of rawNetBalances) {
-            net[debtor]   = (net[debtor]   ?? 0) - amount;
-            net[creditor] = (net[creditor] ?? 0) + amount;
-        }
-
-        // Step 2: greedy matching — pair largest creditor with largest debtor
-        // creditors: positive net (they are owed money)
-        // debtors:   negative net (they owe money)
+    _minimizeNetBalances(net: Record<string, number>): { from: string; to: string; amount: number }[] {
         const creditors = Object.entries(net)
             .filter(([, v]) => v > 0.01)
             .map(([name, v]) => [name, v] as [string, number])
@@ -514,8 +141,79 @@ export const SettlementService = {
             if (Math.abs(creditors[j][1]) < 0.01) j++;
         }
 
-        // Sort by amount descending for consistent display
         result.sort((a, b) => b.amount - a.amount);
         return result;
     },
+
+    /**
+     * Calculate who owes whom using the pure net balance approach.
+     */
+    async calculateGroupSettlements(groupId: string, members?: any[], categoryFilter?: string) {
+        // Step 1: Get all expenses
+        let expQuery = insforge.database.from('expenses').select('id, added_by, amount').eq('group_id', groupId);
+        if (categoryFilter && categoryFilter !== 'All') {
+            expQuery = expQuery.eq('category', categoryFilter);
+        }
+        const { data: expenses, error: expensesError } = await expQuery;
+        if (expensesError) throw new Error(expensesError.message);
+
+        const expenseIds = (expenses || []).map((e: any) => e.id);
+
+        // Step 2: Get all expense splits
+        let splits: any[] = [];
+        if (expenseIds.length > 0) {
+            const { data: splitsData, error: splitsError } = await insforge.database
+                .from('expense_splits')
+                .select('user_id, amount_owed')
+                .in('expense_id', expenseIds);
+            
+            if (splitsError) throw new Error(splitsError.message);
+            splits = splitsData || [];
+        }
+
+        // Step 3: Get all settlements
+        const { data: settlements, error: settlementsError } = await insforge.database
+            .from('settlements')
+            .select('paid_by, paid_to, amount')
+            .eq('group_id', groupId);
+            
+        if (settlementsError) throw new Error(settlementsError.message);
+
+        // Compute net balance per user
+        const net: Record<string, number> = {};
+
+        for (const exp of expenses || []) {
+            const payer = exp.added_by;
+            net[payer] = (net[payer] ?? 0) + Number(exp.amount);
+        }
+
+        for (const split of splits) {
+            const uid = split.user_id;
+            net[uid] = (net[uid] ?? 0) - Number(split.amount_owed);
+        }
+
+        for (const s of settlements || []) {
+            net[s.paid_by] = (net[s.paid_by] ?? 0) + Number(s.amount);
+            net[s.paid_to] = (net[s.paid_to] ?? 0) - Number(s.amount);
+        }
+
+        // Step 4: Run minimization on net balances
+        return SettlementService._minimizeNetBalances(net);
+    },
+
+    /**
+     * Retained for compatibility with Balance.tsx. 
+     * Simply delegates to _minimizeNetBalances after reducing array.
+     */
+    calculateMinimizedSettlements(
+        rawNetBalances: { from: string; to: string; amount: number }[]
+    ): { from: string; to: string; amount: number }[] {
+        const net: Record<string, number> = {};
+        for (const { from: debtor, to: creditor, amount } of rawNetBalances) {
+            net[debtor]   = (net[debtor]   ?? 0) - amount;
+            net[creditor] = (net[creditor] ?? 0) + amount;
+        }
+        return SettlementService._minimizeNetBalances(net);
+    },
 };
+

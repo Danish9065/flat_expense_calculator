@@ -62,9 +62,7 @@ export default function Balance() {
             // 2. Settlement Data: "How to settle up"
             const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, members, category);
             setSettlements(calcSettlements);
-            // Compute minimized settlements from the same raw data (no extra DB fetch)
-            const minimized = SettlementService.calculateMinimizedSettlements(calcSettlements);
-            setMinimizedSettlements(minimized);
+            setMinimizedSettlements(calcSettlements);
 
         } catch (err) {
             console.error('Failed to load balance data', err);
