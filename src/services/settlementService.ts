@@ -33,7 +33,7 @@ export const SettlementService = {
         // causing netBalance to stay stale even when all splits were cleared.
         const splits = await dbQuery(
             'expense_splits',
-            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,user_id,expense_id`
+            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,amount_paid,user_id,expense_id`
         );
 
         let totalOwed = 0;      // what this user still owes others (unsettled)
@@ -42,10 +42,10 @@ export const SettlementService = {
         (splits as any[] || []).forEach((split: any) => {
             const debtor = split.user_id;
             const creditor = expenseCreditorMap[split.expense_id];
-            const amount = Number(split.amount_owed);
+            const amount = Number(split.amount_owed) - Number(split.amount_paid ?? 0);
 
             // Skip self-owed splits (payer's own share cancels out)
-            if (debtor !== creditor) {
+            if (amount > 0 && debtor !== creditor) {
                 if (debtor === userId) totalOwed += amount;
                 if (creditor === userId) realOwedToMe += amount;
             }
@@ -122,12 +122,19 @@ export const SettlementService = {
         let directSplitsCleared = 0;
         if (creditorExpenseIds.length > 0) {
             const idsStr = `(${creditorExpenseIds.join(',')})`;
-            const cleared = await dbUpdate(
+            const splitsToClear = await dbQuery(
                 'expense_splits',
-                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
-                { is_settled: true, settled_at: settledAt }
+                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
             );
-            directSplitsCleared = (cleared as any[] || []).length;
+            
+            for (const split of (splitsToClear as any[] || [])) {
+                await dbUpdate(
+                    'expense_splits',
+                    `id=eq.${split.id}`,
+                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
+                );
+            }
+            directSplitsCleared = (splitsToClear as any[] || []).length;
         }
 
         // 2b. Clear ALL of creditor's unsettled reverse splits on debtor's expenses (gross)
@@ -141,11 +148,17 @@ export const SettlementService = {
 
         if (debtorExpenseIds.length > 0) {
             const idsStr = `(${debtorExpenseIds.join(',')})`;
-            await dbUpdate(
+            const splitsToClear = await dbQuery(
                 'expense_splits',
-                `user_id=eq.${creditorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
-                { is_settled: true, settled_at: settledAt }
+                `user_id=eq.${creditorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
             );
+            for (const split of (splitsToClear as any[] || [])) {
+                await dbUpdate(
+                    'expense_splits',
+                    `id=eq.${split.id}`,
+                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
+                );
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -185,11 +198,17 @@ export const SettlementService = {
 
                 if (intermediateExpenseIds.length > 0) {
                     const idsStr = `(${intermediateExpenseIds.join(',')})`;
-                    await dbUpdate(
+                    const splitsToClear = await dbQuery(
                         'expense_splits',
-                        `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}`,
-                        { is_settled: true, settled_at: settledAt }
+                        `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed`
                     );
+                    for (const split of (splitsToClear as any[] || [])) {
+                        await dbUpdate(
+                            'expense_splits',
+                            `id=eq.${split.id}`,
+                            { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
+                        );
+                    }
                 }
 
                 // ❌ REMOVE Step C3 entirely — do NOT touch intermediate creditor's splits on final creditor's expenses
@@ -238,32 +257,45 @@ export const SettlementService = {
             const idsStr = `(${creditorExpenseIds.join(',')})`;
             const result = await dbQuery(
                 'expense_splits',
-                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed&order=created_at.asc`
+                `user_id=eq.${debtorId}&is_settled=eq.false&expense_id=in.${idsStr}&select=id,amount_owed,amount_paid&order=created_at.asc`
             );
             directSplits = (result as any[] || []);
         }
 
         // ── Step 3: Walk splits, mark settled up to budget (oldest first) ─────
-        let budgetRemaining = partialAmountCents;
-        const toSettleDirect: string[] = [];
-        const totalDirectCents = directSplits.reduce((s, x) => s + Math.round(Number(x.amount_owed) * 100), 0);
+        let budgetRemainingCents = partialAmountCents;
+        const totalDirectCents = directSplits.reduce((s, x) => {
+            const stillOwed = Math.round(Number(x.amount_owed) * 100) - Math.round(Number(x.amount_paid ?? 0) * 100);
+            return s + Math.max(0, stillOwed);
+        }, 0);
 
         for (const split of directSplits) {
-            const splitCents = Math.round(Number(split.amount_owed) * 100);
-            if (splitCents <= budgetRemaining) {
-                toSettleDirect.push(split.id);
-                budgetRemaining -= splitCents;
-            }
-            // If split > remaining budget: skip (atomic — no partial split marking)
-        }
+            if (budgetRemainingCents <= 0) break;
 
-        if (toSettleDirect.length > 0) {
-            const idsStr = `(${toSettleDirect.join(',')})`;
-            await dbUpdate(
-                'expense_splits',
-                `id=in.${idsStr}&is_settled=eq.false`,
-                { is_settled: true, settled_at: settledAt }
-            );
+            const alreadyPaidCents = Math.round(Number(split.amount_paid ?? 0) * 100);
+            const amountOwedCents = Math.round(Number(split.amount_owed) * 100);
+            const stillOwedCents = amountOwedCents - alreadyPaidCents;
+
+            if (stillOwedCents <= 0) continue; // already fully paid, skip
+
+            if (stillOwedCents <= budgetRemainingCents) {
+                // Full split can be cleared
+                await dbUpdate(
+                    'expense_splits',
+                    `id=eq.${split.id}`,
+                    { is_settled: true, amount_paid: split.amount_owed, settled_at: settledAt }
+                );
+                budgetRemainingCents -= stillOwedCents;
+            } else {
+                // Partial: apply remaining budget to this split, don't mark settled
+                const newAmountPaidCents = alreadyPaidCents + budgetRemainingCents;
+                await dbUpdate(
+                    'expense_splits',
+                    `id=eq.${split.id}`,
+                    { amount_paid: newAmountPaidCents / 100 }
+                );
+                budgetRemainingCents = 0;
+            }
         }
 
         // ── Step 4: NOT clearing reverse splits for partial payments ─────────
@@ -284,7 +316,7 @@ export const SettlementService = {
         //             = net_before − cleared_direct                     ← correct
 
         // ── Step 5: Determine if this is a full or partial settlement ─────────
-        const settledSplitsCents = partialAmountCents - budgetRemaining;
+        const settledSplitsCents = partialAmountCents - budgetRemainingCents;
         const isPartial = totalDirectCents - settledSplitsCents > 1; // >1 cent remaining
 
         // ── Step 6: Record the cash payment in settlements table ──────────────
@@ -347,7 +379,7 @@ export const SettlementService = {
         // Step 2: Fetch only UNSETTLED splits — excludes splits already confirmed as settled
         const splits = await dbQuery(
             'expense_splits',
-            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,user_id,expense_id`
+            `expense_id=in.${expenseIdsStr}&is_settled=eq.false&select=amount_owed,amount_paid,user_id,expense_id`
         );
 
         // Step 3: BUG 2 FIX — Build per-pair gross balances (in integer cents, no float drift)
@@ -364,9 +396,12 @@ export const SettlementService = {
             const creditor = expenseCreditorMap[split.expense_id];
             if (!debtor || !creditor || debtor === creditor) return; // skip self-splits
 
-            const amountCents = Math.round(Number(split.amount_owed) * 100);
-            ensurePair(debtor, creditor);
-            pairOwedCents[debtor][creditor] += amountCents;
+            const remainingOwed = Number(split.amount_owed) - Number(split.amount_paid ?? 0);
+            if (remainingOwed > 0) {
+                const amountCents = Math.round(remainingOwed * 100);
+                ensurePair(debtor, creditor);
+                pairOwedCents[debtor][creditor] += amountCents;
+            }
         });
 
         // Step 4: For each ordered pair (A, B), compute net = A_owes_B - B_owes_A
