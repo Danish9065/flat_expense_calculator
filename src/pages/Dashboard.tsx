@@ -1,24 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import insforge from '../lib/db';
 import { dbQuery, dbDelete } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { format, isThisMonth } from 'date-fns';
-import { Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import ExpenseModal from '../components/ExpenseModal';
 import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/ConfirmModal';
 import { CATEGORY_MAP } from '../constants/categories';
+import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 
 export default function Dashboard() {
     const { user } = useAuth();
     const { currentGroup, members, groupId } = useGroup();
     const { success, error: showError } = useToast();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [expenses, setExpenses] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [filterMode, setFilterMode] = useState<string>('all');
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -32,13 +33,18 @@ export default function Dashboard() {
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     const name = user?.full_name?.split(' ')[0] || 'Member';
 
-    const fetchInitialData = async () => {
+    const fetchInitialData = useCallback(async (silent = false) => {
         if (!groupId || !user) {
             setLoading(false);
             return;
         }
 
-        setLoading(true);
+        if (silent) {
+            setIsRefreshing(true);
+        } else {
+            setLoading(true);
+        }
+
         try {
             // Fetch expenses
             const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed)`);
@@ -54,13 +60,18 @@ export default function Dashboard() {
             console.error('Failed to load dashboard data', err);
         } finally {
             setLoading(false);
+            setIsRefreshing(false);
         }
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [groupId, user]);
 
-    // Realtime & Fetch Data setup
+    // Fix 4: re-fetch on group/user switch
     useEffect(() => {
         fetchInitialData();
-    }, [groupId, user]);
+    }, [fetchInitialData]);
+
+    // Fix 1: InsForge Realtime — silent re-fetch when any group member writes data
+    useRealtimeSync(groupId, () => fetchInitialData(true));
 
     // Re-fetch balance whenever Balance.tsx fires a settle-complete event
     useEffect(() => {
@@ -100,6 +111,8 @@ export default function Dashboard() {
 
             await dbDelete('expenses', `id=eq.${expenseToDelete}`);
             success('Expense deleted');
+            // Notify other group members about the change
+            if (groupId) await notifyGroupDataChanged(groupId);
             await fetchInitialData();
         } catch {
             showError('Failed to delete expense');
@@ -213,7 +226,15 @@ export default function Dashboard() {
             </div>
 
             {/* Expense List */}
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Recent Activity</h2>
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Activity</h2>
+                {isRefreshing && (
+                    <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 animate-pulse">
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Updating...
+                    </span>
+                )}
+            </div>
 
             {loading && expenses.length === 0 ? (
                 <div className="space-y-3">
@@ -259,7 +280,10 @@ export default function Dashboard() {
                     onClose={() => setModalOpen(false)}
                     groupId={groupId}
                     editingExpense={editingExpense}
-                    onSuccess={fetchInitialData}
+                    onSuccess={async () => {
+                        await fetchInitialData();
+                        if (groupId) await notifyGroupDataChanged(groupId);
+                    }}
                 />
             )}
 

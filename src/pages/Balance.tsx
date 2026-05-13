@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { dbQuery } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3 } from 'lucide-react';
+import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, RefreshCw } from 'lucide-react';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
+import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 
 // Colors for the donut chart
 const COLORS = ['#6C63FF', '#22C55E', '#F59E0B', '#EF4444', '#06b6d4', '#8b5cf6', '#ec4899'];
@@ -17,6 +18,7 @@ export default function Balance() {
     const { success, error: showError } = useToast();
 
     const [loading, setLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [settling, setSettling] = useState<string | null>(null);
     const [category, setCategory] = useState<string>('All');
     // Partial payment state
@@ -31,8 +33,14 @@ export default function Balance() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [minimizedSettlements, setMinimizedSettlements] = useState<any[]>([]);
 
-    const fetchBalanceData = async () => {
+    const fetchBalanceData = useCallback(async (silent = false) => {
         if (!groupId) { setLoading(false); return; }
+
+        if (silent) {
+            setIsRefreshing(true);
+        } else {
+            setLoading(true);
+        }
 
         try {
             // 1. Chart Data: "Who paid what" total
@@ -68,13 +76,18 @@ export default function Balance() {
             console.error('Failed to load balance data', err);
         } finally {
             setLoading(false);
+            setIsRefreshing(false);
         }
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [groupId, members, category]);
 
+    // Fix 4: re-fetch on group/category switch
     useEffect(() => {
         fetchBalanceData();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [groupId, members, category]);
+    }, [fetchBalanceData]);
+
+    // Fix 1: InsForge Realtime — silent re-fetch when any group member writes data
+    useRealtimeSync(groupId, () => fetchBalanceData(true));
 
     /**
      * Open the inline partial-payment modal for a given debt pair.
@@ -110,8 +123,10 @@ export default function Balance() {
             }
             setSettlingCard(null);
             setPartialAmount('');
-            await fetchBalanceData();
+            // Fix 2: optimistic re-fetch already happened — now notify others
+            if (groupId) await notifyGroupDataChanged(groupId);
             window.dispatchEvent(new CustomEvent('settle-complete'));
+            await fetchBalanceData();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Failed to settle up');
@@ -224,7 +239,15 @@ export default function Balance() {
 
     return (
         <div className="pb-24 pt-6 px-4 max-w-lg mx-auto min-h-screen">
-            <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white mb-6">Balances</h1>
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white">Balances</h1>
+                {isRefreshing && (
+                    <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 animate-pulse">
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Updating...
+                    </span>
+                )}
+            </div>
 
             {/* Donut Chart */}
             <div className="bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-6">
