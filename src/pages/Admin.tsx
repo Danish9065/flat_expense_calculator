@@ -116,24 +116,25 @@ export default function Admin() {
         return (
             <div className="flex flex-col items-center justify-center p-12 text-center h-[80vh]">
                 <Shield className="w-16 h-16 text-danger mb-4" />
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Access Denied</h2>
-                <p className="text-gray-500 mt-2">You need administrator privileges to view this page.</p>
+                <h2 className="text-xl font-bold text-white">Access Denied</h2>
+                <p className="text-muted-foreground mt-2">You need administrator privileges to view this page.</p>
             </div>
         );
     }
 
     return (
-        <div className="pb-24 pt-6 px-4 max-w-lg mx-auto min-h-screen space-y-6">
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center">
+        <div className="app-section pb-28 min-h-screen space-y-8">
+            <div className="text-center mb-8">
+                <p className="app-label mb-3">Secure management</p>
+                <h1 className="app-title flex items-center justify-center">
                     <Shield className="w-6 h-6 mr-2 text-primary" />
                     Admin Panel
                 </h1>
             </div>
 
-            <div className="bg-card dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+            <div className="app-panel p-6 lg:p-8">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center">
+                    <h2 className="text-lg font-bold text-white flex items-center">
                         <Key className="w-5 h-5 mr-2 text-primary" />
                         Invite Keys
                     </h2>
@@ -143,12 +144,12 @@ export default function Admin() {
                             placeholder="Assign to (optional)..."
                             value={assignToName}
                             onChange={(e) => setAssignToName(e.target.value)}
-                            className="flex-1 sm:w-48 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-primary focus:border-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            className="dark-input flex-1 sm:w-48 px-3 py-2 text-sm rounded-lg"
                         />
                         <button
                             onClick={handleGenerateKey}
                             disabled={generating}
-                            className="flex items-center px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 whitespace-nowrap"
+                            className="accent-button flex items-center px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap"
                         >
                             {generating ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Key className="w-4 h-4 mr-2" />}
                             New Key
@@ -157,9 +158,9 @@ export default function Admin() {
                 </div>
 
                 {loading ? (
-                    <div className="flex justify-center py-8"><RefreshCw className="w-6 h-6 animate-spin text-gray-400" /></div>
+                    <div className="flex justify-center py-8"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
                 ) : keys.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No invite keys found.</div>
+                    <div className="text-center py-8 text-muted-foreground">No invite keys found.</div>
                 ) : (
                     <div className="space-y-3">
                         {keys.map((key) => {
@@ -168,23 +169,23 @@ export default function Admin() {
                             const isExpired = key.expires_at && new Date(key.expires_at) < new Date();
 
                             return (
-                                <div key={key.id} className={`p-4 rounded-xl border ${isUsed ? 'bg-gray-50 border-gray-100 dark:bg-gray-800/50 dark:border-gray-700' : 'bg-white border-primary/20 dark:bg-gray-800'}`}>
+                                <div key={key.id} className={`p-4 rounded-2xl border ${isUsed ? 'bg-white/[0.03] border-white/10' : 'bg-primary/10 border-primary/25'}`}>
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <code className="font-mono text-lg font-bold text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                                            <code className="font-mono text-lg font-bold text-white bg-white/10 px-2 py-1 rounded">
                                                 {key.key_code}
                                             </code>
-                                            <p className="text-xs text-gray-500 mt-2">
+                                            <p className="text-xs text-muted-foreground mt-2">
                                                 Created {format(new Date(key.created_at), 'MMM d, yyyy')}
                                             </p>
                                         </div>
                                         <div>
                                             {isUsed ? (
-                                                <span className="flex items-center text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md">
+                                                <span className="flex items-center text-xs font-medium text-muted-foreground bg-white/[0.06] px-2 py-1 rounded-md">
                                                     <CheckCircle2 className="w-3 h-3 mr-1" /> Used
                                                 </span>
                                             ) : isExpired ? (
-                                                <span className="flex items-center text-xs font-medium text-danger bg-danger/10 px-2 py-1 rounded-md">
+                                                <span className="flex items-center text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded-md">
                                                     <Clock className="w-3 h-3 mr-1" /> Expired
                                                 </span>
                                             ) : (
@@ -195,13 +196,13 @@ export default function Admin() {
                                         </div>
                                     </div>
                                     {isUsed && (
-                                        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50 text-sm flex items-center text-gray-600 dark:text-gray-400">
-                                            Used by: <span className="font-medium text-gray-900 dark:text-gray-200 ml-1">{usedByName || 'Unknown'}</span>
+                                        <div className="mt-3 pt-3 border-t border-[#1E1E1E] text-sm flex items-center text-muted-foreground">
+                                            Used by: <span className="font-medium text-white ml-1">{usedByName || 'Unknown'}</span>
                                         </div>
                                     )}
                                     {!isUsed && key.assigned_to && (
-                                        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50 text-sm flex items-center text-gray-600 dark:text-gray-400">
-                                            Assigned to: <span className="font-medium text-gray-900 dark:text-gray-200 ml-1">{key.assigned_to}</span>
+                                        <div className="mt-3 pt-3 border-t border-[#1E1E1E] text-sm flex items-center text-muted-foreground">
+                                            Assigned to: <span className="font-medium text-white ml-1">{key.assigned_to}</span>
                                         </div>
                                     )}
                                 </div>
@@ -215,19 +216,19 @@ export default function Admin() {
             <div className="mt-8">
                 <div className="flex items-center gap-2 mb-4">
                     <Users className="w-5 h-5 text-primary" />
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Manage Users</h2>
+                    <h2 className="text-lg font-bold text-white">Manage Users</h2>
                 </div>
                 <div className="space-y-2">
                     {users.map(u => (
-                        <div key={u.id} className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-xl px-4 py-3 border border-gray-100 dark:border-gray-700">
+                        <div key={u.id} className="flex items-center justify-between bg-card rounded-2xl px-4 py-3 border border-white/10">
                             <div>
-                                <p className="font-medium text-gray-900 dark:text-white">{u.full_name}</p>
-                                <p className="text-xs text-gray-400 capitalize">{u.role}</p>
+                                <p className="font-medium text-white">{u.full_name}</p>
+                                <p className="text-xs text-muted-foreground capitalize">{u.role}</p>
                             </div>
                             {u.id !== user?.id && (
                                 <button
                                     onClick={() => setUserToDelete(u)}
-                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                    className="p-2 text-primary hover:text-primary/80 hover:bg-primary/10 rounded-lg transition-colors"
                                 >
                                     <Trash2 className="w-4 h-4" />
                                 </button>
@@ -235,7 +236,7 @@ export default function Admin() {
                         </div>
                     ))}
                     {users.length === 0 && (
-                        <p className="text-sm text-gray-400 text-center py-4">No users found</p>
+                        <p className="text-sm text-muted-foreground text-center py-4">No users found</p>
                     )}
                 </div>
             </div>
@@ -244,19 +245,19 @@ export default function Admin() {
             <div className="mt-8">
                 <div className="flex items-center gap-2 mb-4">
                     <AlertTriangle className="w-5 h-5 text-danger" />
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Danger Zone</h2>
+                    <h2 className="text-lg font-bold text-white">Danger Zone</h2>
                 </div>
-                <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-5">
+                <div className="bg-primary/10 border border-primary/25 rounded-2xl p-5">
                     <div className="flex flex-col mb-4">
-                        <h3 className="font-bold text-gray-900 dark:text-white mb-1">Delete All Expenses</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <h3 className="font-bold text-white mb-1">Delete All Expenses</h3>
+                        <p className="app-subtitle">
                             Permanently remove all expenses, splits, and settlements for this group. This will completely reset the balances.
                         </p>
                     </div>
                     <button
                         onClick={() => setShowDeleteAllExpenses(true)}
                         disabled={!groupId || deletingExpenses}
-                        className="w-full flex justify-center items-center py-2.5 px-4 font-bold rounded-xl text-white bg-danger hover:bg-danger/90 disabled:opacity-50 transition-all shadow-sm"
+                        className="danger-button w-full flex justify-center items-center py-2.5 px-4 font-bold rounded-xl transition-all shadow-sm"
                     >
                         {deletingExpenses ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5 mr-2" />}
                         {deletingExpenses ? 'Deleting...' : 'Wipe All Group Data'}

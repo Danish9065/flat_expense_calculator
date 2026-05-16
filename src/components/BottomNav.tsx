@@ -21,7 +21,7 @@ export default function BottomNav() {
     }
 
     return (
-        <div className="fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 md:hidden z-40 pb-safe">
+        <div className="fixed bottom-0 w-full bg-[#0D0D0D]/95 backdrop-blur-xl border-t border-white/10 md:hidden z-40 pb-safe shadow-[0_-12px_40px_rgba(0,0,0,0.35)]">
             <div className="flex justify-around items-center h-16">
                 {navItems.map((item) => {
                     const isActive = location.pathname === item.path;
@@ -31,7 +31,7 @@ export default function BottomNav() {
                         <Link
                             key={item.path}
                             to={item.path}
-                            className={`flex flex-col items-center justify-center w-full h-full space-y-1 relative ${isActive ? 'text-primary' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                            className={`flex flex-col items-center justify-center w-full h-full space-y-1 relative ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-white'
                                 }`}
                         >
                             <Icon className={`w-6 h-6 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
@@ -39,7 +39,7 @@ export default function BottomNav() {
                                 {item.label}
                             </span>
                             {isActive && (
-                                <div className="absolute top-1 right-1/4 w-1.5 h-1.5 bg-primary rounded-full shadow-[0_0_4px_rgba(108,99,255,0.5)]" />
+                                <div className="absolute top-1 right-1/4 w-1.5 h-1.5 bg-primary rounded-full shadow-[0_0_8px_rgba(255,86,86,0.6)]" />
                             )}
                         </Link>
                     );
