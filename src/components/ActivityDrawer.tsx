@@ -93,26 +93,26 @@ export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: Acti
             {/* Backdrop */}
             {isOpen && (
                 <div
-                    className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 transition-opacity"
+                    className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 transition-opacity"
                     onClick={onClose}
                 />
             )}
 
             {/* Drawer */}
             <div
-                className={`fixed top-0 right-0 h-full w-full sm:w-80 bg-white dark:bg-gray-900 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'
+                className={`fixed top-0 right-0 h-full w-full sm:w-96 bg-[#0D0D0D] border-l border-white/10 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'
                     }`}
             >
                 <div className="h-full flex flex-col">
                     {/* Header */}
-                    <div className="px-4 py-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/20">
-                        <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center">
+                    <div className="px-4 py-4 border-b border-white/10 flex justify-between items-center bg-white/[0.03]">
+                        <h2 className="text-lg font-bold text-white flex items-center">
                             <Activity className="w-5 h-5 mr-2 text-primary" />
                             Live Feed
                         </h2>
                         <button
                             onClick={onClose}
-                            className="p-2 -mr-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                            className="p-2 -mr-2 text-muted-foreground hover:bg-white/[0.06] hover:text-white rounded-lg transition-colors"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -122,65 +122,65 @@ export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: Acti
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
                         {activities.length === 0 ? (
                             <div className="text-center py-12 px-4">
-                                <Coffee className="w-12 h-12 text-gray-300 dark:text-gray-700 mx-auto mb-3" />
-                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">It's quiet in here.</p>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Actions in your group will appear here in real-time.</p>
+                                <Coffee className="w-12 h-12 text-white/15 mx-auto mb-3" />
+                                <p className="text-sm font-medium text-muted-foreground">It's quiet in here.</p>
+                                <p className="text-xs text-white/35 mt-1">Actions in your group will appear here in real-time.</p>
                             </div>
                         ) : (
                             activities.map((act) => {
                                 let colorClass = '';
-                                let icon = <History className="w-4 h-4 text-gray-400" />;
+                                let icon = <History className="w-4 h-4 text-muted-foreground" />;
 
                                 switch (act.type) {
                                     case 'INSERT_expense':
-                                        colorClass = 'text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400';
-                                        icon = <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />;
+                                        colorClass = 'text-green-300 bg-green-500/10';
+                                        icon = <CheckCircle2 className="w-4 h-4 text-green-300" />;
                                         break;
                                     case 'UPDATE_expense':
-                                        colorClass = 'text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400';
-                                        icon = <Check className="w-4 h-4 text-amber-600 dark:text-amber-400" />;
+                                        colorClass = 'text-amber-300 bg-amber-500/10';
+                                        icon = <Check className="w-4 h-4 text-amber-300" />;
                                         break;
                                     case 'DELETE_expense':
-                                        colorClass = 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400';
-                                        icon = <X className="w-4 h-4 text-red-600 dark:text-red-400" />;
+                                        colorClass = 'text-red-300 bg-red-500/10';
+                                        icon = <X className="w-4 h-4 text-red-300" />;
                                         break;
                                     case 'SETTLEMENT':
-                                        colorClass = 'text-primary bg-primary/10 dark:text-primary';
+                                        colorClass = 'text-primary bg-primary/10';
                                         icon = <Banknote className="w-4 h-4 text-primary" />;
                                         break;
                                     default:
-                                        colorClass = 'text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400';
+                                        colorClass = 'text-muted-foreground bg-white/[0.04]';
                                 }
 
                                 return (
                                     <div key={act.id} className="flex space-x-3 items-start relative group">
                                         {/* Timeline Line (decorative) */}
-                                        <div className="absolute left-4 top-8 -bottom-4 w-px bg-gray-100 dark:bg-gray-800 z-0 drop-shadow-sm"></div>
+                                        <div className="absolute left-4 top-8 -bottom-4 w-px bg-white/10 z-0 drop-shadow-sm"></div>
 
-                                        <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-2 border-white dark:border-gray-900 shadow-sm ${colorClass}`}>
+                                        <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 border border-white/10 shadow-sm ${colorClass}`}>
                                             {icon}
                                         </div>
 
-                                        <div className={`flex-1 bg-white dark:bg-gray-800/50 rounded-xl p-3 border shadow-sm transition-colors relative ${act.is_read ? 'border-gray-100 dark:border-gray-800' : 'border-primary/30 dark:border-primary/50 bg-primary/5'}`}>
+                                        <div className={`flex-1 rounded-2xl p-3 border shadow-sm transition-colors relative ${act.is_read ? 'bg-white/[0.04] border-white/10' : 'bg-primary/10 border-primary/40'}`}>
 
                                             {!act.is_read && (
                                                 <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-primary animate-pulse"></div>
                                             )}
 
-                                            <p className="text-sm text-gray-900 dark:text-gray-200 pr-5">
+                                            <p className="text-sm text-white pr-5">
                                                 {act.message}
                                             </p>
                                             {act.groups?.name && (
-                                                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+                                                <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
                                                     <span>📁</span>
                                                     <span>{act.groups.name}</span>
                                                 </p>
                                             )}
                                             <div className="flex items-center justify-between mt-2">
-                                                <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                                                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                                                     {formatDistanceToNow(new Date(act.created_at), { addSuffix: true })}
                                                 </p>
-                                                <button onClick={(e) => deleteNotification(act.id, e)} className="text-gray-400 hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                                <button onClick={(e) => deleteNotification(act.id, e)} className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white/[0.06] rounded-md">
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </button>
                                             </div>

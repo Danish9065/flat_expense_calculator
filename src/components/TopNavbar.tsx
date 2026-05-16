@@ -55,17 +55,17 @@ export default function TopNavbar() {
 
     return (
         <>
-            <nav className="flex bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 fixed top-0 w-full z-40 h-16 shadow-sm">
+            <nav className="flex bg-[#0D0D0D]/95 backdrop-blur-xl border-b border-white/10 fixed top-0 w-full z-40 h-16 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
                     <div className="flex justify-between items-center h-full">
 
                         {/* Logo */}
                         <div className="flex-shrink-0 flex items-center">
                             <Link to="/dashboard" className="flex items-center space-x-2">
-                                <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-bold">
+                                <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-bold shadow-[0_0_24px_rgba(255,86,86,0.28)]">
                                     <Receipt className="w-5 h-5" />
                                 </div>
-                                <span className="text-xl font-extrabold text-primary tracking-tight">SplitMate</span>
+                                <span className="text-xl font-extrabold text-white tracking-tight">SplitMate</span>
                             </Link>
                         </div>
 
@@ -79,7 +79,7 @@ export default function TopNavbar() {
                                         to={item.path}
                                         className={`text-sm font-semibold transition-colors ${isActive
                                             ? 'text-primary border-b-2 border-primary py-5'
-                                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                            : 'text-muted-foreground hover:text-white'
                                             }`}
                                     >
                                         {item.label}
@@ -92,36 +92,36 @@ export default function TopNavbar() {
                         <div className="flex items-center space-x-4">
                             <button
                                 onClick={() => setDrawerOpen(true)}
-                                className="relative p-2 text-gray-400 hover:text-gray-500 transition-colors"
+                                className="relative p-2 text-muted-foreground hover:text-white transition-colors rounded-lg hover:bg-white/[0.06]"
                             >
                                 <Bell className="w-5 h-5" />
                                 {unreadCount > 0 && (
-                                    <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-danger ring-2 ring-white dark:ring-gray-800" />
+                                    <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-primary ring-2 ring-[#0D0D0D]" />
                                 )}
                             </button>
 
-                            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700" />
+                            <div className="h-6 w-px bg-white/10" />
 
                             <div className="flex items-center space-x-3">
                                 <div className="hidden lg:flex flex-col text-right">
-                                    <span className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
-                                        {user.full_name?.split(' ')[0] || 'Member'}
-                                    </span>
-                                    <span className="text-xs text-gray-500 font-medium">
-                                        {role === 'admin' ? 'Admin' : 'Member'}
-                                    </span>
+                                        <span className="text-sm font-bold text-white leading-tight">
+                                            {user.full_name?.split(' ')[0] || 'Member'}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground font-medium">
+                                            {role === 'admin' ? 'Admin' : 'Member'}
+                                        </span>
                                 </div>
                                 {user.avatar_url ? (
-                                    <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-full ml-2 border-2 border-white dark:border-gray-800 shadow-sm" />
+                                    <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-full ml-2 border-2 border-white/10 shadow-sm object-cover" />
                                 ) : (
-                                    <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold ml-2 border-2 border-white dark:border-gray-800 shadow-sm">
+                                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold ml-2 border-2 border-white/10 shadow-sm">
                                         {fallbackInitial}
                                     </div>
                                 )}
 
                                 <button
                                     onClick={signOut}
-                                    className="p-1.5 text-gray-400 hover:text-danger hover:bg-danger/10 rounded-lg transition-colors ml-2"
+                                    className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors ml-2"
                                     title="Sign out"
                                 >
                                     <LogOut className="w-4 h-4" />

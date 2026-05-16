@@ -3,8 +3,66 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-background text-gray-900 antialiased;
+    @apply bg-background text-white antialiased;
   }
 }
 
+@layer components {
+  .app-section {
+    @apply w-full max-w-7xl mx-auto px-4 md:px-16 py-8 md:py-12;
+  }
+
+  .app-panel {
+    @apply bg-card border border-white/10 rounded-2xl shadow-[0_24px_80px_rgba(0,0,0,0.35)];
+  }
+
+  .app-panel-muted {
+    @apply bg-muted/50 border border-white/10 rounded-2xl;
+  }
+
+  .app-divider {
+    @apply divide-y divide-[#1E1E1E];
+  }
+
+  .app-label {
+    @apply text-[11px] font-mono uppercase tracking-widest text-muted-foreground;
+  }
+
+  .app-title {
+    @apply text-3xl md:text-4xl lg:text-5xl font-normal tracking-normal text-white;
+  }
+
+  .app-subtitle {
+    @apply text-sm leading-6 text-muted-foreground;
+  }
+
+  .accent-button {
+    @apply bg-primary text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+
+  .ghost-button {
+    @apply border border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.08] disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+
+  .danger-button {
+    @apply bg-danger text-white hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+
+  .dark-input {
+    @apply w-full border border-white/10 bg-white/[0.04] text-white placeholder:text-white/30 focus:border-primary focus:ring-2 focus:ring-primary/25 outline-none transition;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

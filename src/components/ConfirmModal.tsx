@@ -50,35 +50,35 @@ export default function ConfirmModal({
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity"
+                className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
                 onClick={handleClose}
             />
 
             {/* Modal Content */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm relative z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="app-panel w-full max-w-sm relative z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <div className="p-6">
-                    <div className="w-12 h-12 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-4">
+                    <div className="w-12 h-12 rounded-full bg-primary/15 text-primary flex items-center justify-center mb-4">
                         <AlertTriangle className="w-6 h-6" />
                     </div>
 
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                    <h3 className="text-xl font-bold text-white mb-2">
                         {title}
                     </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
+                    <p className="app-subtitle mb-6">
                         {message}
                     </p>
 
                     {requireWordOption && (
                         <div className="mb-6">
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Type <span className="font-bold font-mono bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-gray-900 dark:text-white">{requireWordOption}</span> to confirm.
+                            <label className="block text-xs font-medium text-muted-foreground mb-2">
+                                Type <span className="font-bold font-mono bg-white/10 px-1 py-0.5 rounded text-white">{requireWordOption}</span> to confirm.
                             </label>
                             <input
                                 type="text"
                                 value={typedWord}
                                 onChange={(e) => setTypedWord(e.target.value)}
                                 placeholder={requireWordOption}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-danger focus:border-danger sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white font-mono"
+                                className="dark-input px-3 py-2 rounded-lg sm:text-sm font-mono"
                             />
                         </div>
                     )}
@@ -87,14 +87,14 @@ export default function ConfirmModal({
                         <button
                             onClick={handleClose}
                             disabled={loading}
-                            className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl font-semibold text-sm transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+                            className="ghost-button flex-1 px-4 py-2.5 rounded-xl font-semibold text-sm"
                         >
                             Cancel
                         </button>
                         <button
                             onClick={handleConfirm}
                             disabled={isConfirmDisabled || loading}
-                            className="flex-1 flex justify-center items-center px-4 py-2.5 bg-danger text-white hover:bg-danger/90 rounded-xl font-bold text-sm transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="danger-button flex-1 flex justify-center items-center px-4 py-2.5 rounded-xl font-bold text-sm focus:ring-2 focus:ring-offset-2 focus:ring-danger focus:ring-offset-background"
                         >
                             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : confirmText}
                         </button>
@@ -105,7 +105,7 @@ export default function ConfirmModal({
                 <button
                     onClick={handleClose}
                     disabled={loading}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 transition-colors disabled:opacity-50"
+                    className="absolute top-4 right-4 text-muted-foreground hover:text-white transition-colors disabled:opacity-50"
                 >
                     <X className="w-5 h-5" />
                 </button>

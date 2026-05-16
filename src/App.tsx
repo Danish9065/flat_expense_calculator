@@ -46,7 +46,7 @@ function App() {
         <AuthProvider>
           <GroupProvider>
             <ToastProvider>
-              <div className="min-h-screen bg-background text-gray-900 font-sans flex flex-col pt-16 md:pt-20 pb-16 md:pb-0">
+              <div className="min-h-screen bg-background text-white font-sans flex flex-col pt-16 md:pt-20 pb-16 md:pb-0">
                 <TopNavbar />
 
                 <main className="flex-grow w-full">

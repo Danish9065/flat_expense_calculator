@@ -153,14 +153,14 @@ export default function Balance() {
             : '';
 
         return (
-            <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
-                    Total owed: <span className="text-gray-900 dark:text-white font-bold">₹{fullAmount.toFixed(2)}</span>
+            <div className="mt-3 pt-3 border-t border-[#1E1E1E]">
+                <p className="text-xs font-semibold text-muted-foreground mb-2">
+                    Total owed: <span className="text-white font-bold">₹{fullAmount.toFixed(2)}</span>
                 </p>
                 <div className="flex items-center space-x-2 mb-2">
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400 shrink-0">Paying:</span>
+                    <span className="text-sm font-medium text-muted-foreground shrink-0">Paying:</span>
                     <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">₹</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary font-bold text-sm">₹</span>
                         <input
                             id={`partial-input-${key}`}
                             type="number"
@@ -175,7 +175,7 @@ export default function Balance() {
                                     setPartialAmount(val);
                                 }
                             }}
-                            className="w-full pl-7 pr-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm font-semibold bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            className="dark-input pl-7 pr-3 py-2 rounded-lg text-sm font-semibold"
                             disabled={isSettlingNow}
                         />
                     </div>
@@ -183,8 +183,8 @@ export default function Balance() {
                 {hint && (
                     <p className={`text-[11px] mb-2 leading-tight ${
                         isFullPayment
-                            ? 'text-green-600 dark:text-green-400 font-semibold'
-                            : 'text-amber-600 dark:text-amber-400'
+                        ? 'text-green-300 font-semibold'
+                            : 'text-amber-300'
                     }`}>
                         {hint}
                     </p>
@@ -194,7 +194,7 @@ export default function Balance() {
                         id={`cancel-settle-${key}`}
                         onClick={() => { setSettlingCard(null); setPartialAmount(''); }}
                         disabled={isSettlingNow}
-                        className="flex-1 py-2 text-xs font-bold rounded-lg border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        className="ghost-button flex-1 py-2 text-xs font-bold rounded-lg"
                     >
                         Cancel
                     </button>
@@ -202,7 +202,7 @@ export default function Balance() {
                         id={`confirm-settle-${key}`}
                         onClick={() => handleSettleUp(from, to, enteredNum, fullAmount)}
                         disabled={isSettlingNow || !isValid}
-                        className="flex-1 py-2 text-xs font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center space-x-1"
+                        className="accent-button flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center space-x-1"
                     >
                         {isSettlingNow
                             ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Processing...</span></>
@@ -232,26 +232,27 @@ export default function Balance() {
 
     if (!groupId) return (
         <div className="text-center py-20 px-4">
-            <h2 className="text-xl font-bold">No Balances</h2>
-            <p className="text-gray-500 mt-2">Join a group first to see your balance</p>
+            <h2 className="text-xl font-bold text-white">No Balances</h2>
+            <p className="text-muted-foreground mt-2">Join a group first to see your balance</p>
         </div>
     );
 
     return (
-        <div className="pb-24 pt-6 px-4 max-w-lg mx-auto min-h-screen">
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white">Balances</h1>
+        <div className="app-section pb-28 min-h-screen">
+            <div className="text-center mb-8">
+                <p className="app-label mb-3">Group settlement calculator</p>
+                <h1 className="app-title">Balances</h1>
                 {isRefreshing && (
-                    <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 animate-pulse">
+                    <span className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground animate-pulse">
                         <RefreshCw className="w-3 h-3 animate-spin" />
                         Updating...
                     </span>
                 )}
             </div>
 
-            {/* Donut Chart */}
-            <div className="bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-6">
-                <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Who paid what</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 app-panel overflow-hidden mb-8">
+            <div className="bg-card p-6 lg:p-8 border-b lg:border-b-0 lg:border-r border-[#1E1E1E]">
+                <h2 className="text-lg font-bold text-white mb-2">Who paid what</h2>
                 {chartData.length > 0 ? (
                     <div className="h-64 w-full">
                         <ResponsiveContainer width="100%" height="100%">
@@ -279,35 +280,36 @@ export default function Balance() {
                         </ResponsiveContainer>
                     </div>
                 ) : (
-                    <div className="h-48 flex items-center justify-center text-gray-400">
+                    <div className="h-48 flex items-center justify-center text-muted-foreground">
                         No expenses yet
                     </div>
                 )}
             </div>
 
             {/* Category Breakdown */}
-            <div className="mb-6">
-                <h2 className="text-sm font-bold text-gray-900 dark:text-white mb-3 uppercase tracking-wider">Category Breakdown</h2>
+            <div className="p-6 lg:p-8">
+                <h2 className="app-label mb-4">Category Breakdown</h2>
                 <div className="grid grid-cols-2 gap-3">
                     {Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]).map(([cat, total]) => {
                         const mapEntry = CATEGORY_MAP[cat] || CATEGORY_MAP['General'];
                         const Icon = mapEntry.icon;
                         return (
-                            <div key={cat} className="bg-card dark:bg-gray-800 p-3 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center space-x-3">
+                            <div key={cat} className="app-panel-muted p-3 flex items-center space-x-3">
                                 <div className={`p-2 rounded-xl ${mapEntry.colorClass}`}>
                                     <Icon className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">{cat}</p>
-                                    <p className="font-extrabold text-gray-900 dark:text-white">₹{total.toFixed(0)}</p>
+                                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{cat}</p>
+                                    <p className="font-extrabold text-white">₹{total.toFixed(0)}</p>
                                 </div>
                             </div>
                         );
                     })}
                     {Object.keys(categoryTotals).length === 0 && (
-                        <p className="text-xs text-gray-400 col-span-2 italic">Reflects applied filters above</p>
+                        <p className="text-xs text-muted-foreground col-span-2 italic">Reflects applied filters above</p>
                     )}
                 </div>
+            </div>
             </div>
 
             {/* ── Shared Category Filter Tabs ── */}
@@ -319,7 +321,7 @@ export default function Balance() {
                         className={`px-3 py-1 rounded-full text-xs font-bold transition-colors whitespace-nowrap ${
                             category === cat
                                 ? 'bg-primary text-white'
-                                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                : 'bg-white/[0.04] text-muted-foreground border border-white/10 hover:text-white'
                         }`}
                     >
                         {cat}
@@ -330,21 +332,21 @@ export default function Balance() {
             {/* ── SECTION 1: How to Settle Up (Minimized) ── */}
             <div className="mb-2">
                 <div className="flex items-center space-x-2 mb-1">
-                    <div className="p-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-900/40">
-                        <Handshake className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                        <div className="p-1.5 rounded-xl bg-primary/10">
+                        <Handshake className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">How to Settle Up</h2>
-                        <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-tight">Minimum transactions to clear debts</p>
+                        <h2 className="text-lg font-bold text-white leading-tight">How to Settle Up</h2>
+                        <p className="text-[11px] text-muted-foreground leading-tight">Minimum transactions to clear debts</p>
                     </div>
                 </div>
             </div>
 
             {minimizedSettlements.length === 0 ? (
-                <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 border-dashed mb-6">
+                <div className="text-center py-12 app-panel border-dashed mb-6">
                     <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />
-                    <p className="text-gray-500 dark:text-gray-400 font-medium">All settled up!</p>
-                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">No pending balances in the group.</p>
+                    <p className="text-muted-foreground font-medium">All settled up!</p>
+                    <p className="text-sm text-white/35 mt-1">No pending balances in the group.</p>
                 </div>
             ) : (
                 <div className="space-y-3 mb-8">
@@ -357,23 +359,23 @@ export default function Balance() {
                         const isSettlingNow = settling === settlingKey;
 
                         return (
-                            <div key={idx} className={`bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border ${
-                                isUserInvolved ? 'border-indigo-300/60 dark:border-indigo-600/40' : 'border-gray-100 dark:border-gray-700'
+                            <div key={idx} className={`bg-card p-4 rounded-2xl shadow-sm border ${
+                                isUserInvolved ? 'border-primary/50' : 'border-white/10'
                             }`}>
                                 <div className="flex items-center justify-between">
                                     {/* Avatars & Owes arrow */}
                                     <div className="flex items-center space-x-3 flex-1 min-w-0">
-                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-gray-200" />
+                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                         <div className="flex flex-col items-center px-2">
-                                            <span className="text-[10px] text-gray-400 font-medium tracking-wider uppercase mb-1">Owes</span>
-                                            <ArrowRight className="w-4 h-4 text-gray-300" />
+                                            <span className="text-[10px] text-muted-foreground font-medium tracking-wider uppercase mb-1">Owes</span>
+                                            <ArrowRight className="w-4 h-4 text-white/25" />
                                         </div>
-                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-gray-200" />
+                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                     </div>
 
-                                    <div className="flex items-center space-x-4 pl-4 border-l border-gray-100 dark:border-gray-700 ml-2">
+                                    <div className="flex items-center space-x-4 pl-4 border-l border-[#1E1E1E] ml-2">
                                         <div className="text-right">
-                                            <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(2)}</span>
+                                            <span className="block font-bold text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
                                         {isCreditor ? (() => {
                                                 const settleAmount = s.amount;
@@ -383,13 +385,13 @@ export default function Balance() {
                                                         id={`settle-btn-minimized-${settlingKey}`}
                                                         onClick={() => openSettleModal(s.from, s.to, settleAmount)}
                                                         disabled={isSettlingNow}
-                                                        className="bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                                        className="accent-button text-xs font-bold px-3 py-2 rounded-lg"
                                                     >
                                                         Settle
                                                     </button>
                                                 );
                                             })() : isDebtor ? (
-                                            <div className="text-[10px] text-gray-500 italic max-w-[80px] leading-tight text-center">
+                                            <div className="text-[10px] text-muted-foreground italic max-w-[80px] leading-tight text-center">
                                                 Pending payment...
                                             </div>
                                         ) : (
@@ -404,12 +406,12 @@ export default function Balance() {
                                     return renderSettleModal(s.from, s.to, settleAmount);
                                 })()}
 
-                                <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 text-center">
-                                    <span className={fromMe ? 'font-bold text-gray-900 dark:text-gray-200' : ''}>
+                                <div className="mt-3 text-sm text-muted-foreground text-center">
+                                    <span className={fromMe ? 'font-bold text-white' : ''}>
                                         {fromMe ? 'You' : getMemberName(s.from).split(' ')[0]}
                                     </span>
                                     {' owe '}
-                                    <span className={isCreditor ? 'font-bold text-gray-900 dark:text-gray-200' : ''}>
+                                    <span className={isCreditor ? 'font-bold text-white' : ''}>
                                         {user?.id === s.to ? 'You' : getMemberName(s.to).split(' ')[0]}
                                     </span>
                                 </div>
@@ -422,21 +424,21 @@ export default function Balance() {
             {/* ── SECTION 2: Full Balance Breakdown (existing — DO NOT modify) ── */}
             <div className="mb-4">
                 <div className="flex items-center space-x-2 mb-1">
-                    <div className="p-1.5 rounded-xl bg-violet-100 dark:bg-violet-900/40">
-                        <BarChart3 className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                        <div className="p-1.5 rounded-xl bg-white/[0.06]">
+                        <BarChart3 className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">Full Balance Breakdown</h2>
-                        <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-tight">Every individual debt pair</p>
+                        <h2 className="text-lg font-bold text-white leading-tight">Full Balance Breakdown</h2>
+                        <p className="text-[11px] text-muted-foreground leading-tight">Every individual debt pair</p>
                     </div>
                 </div>
             </div>
 
             {settlements.length === 0 ? (
-                <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 border-dashed">
+                <div className="text-center py-12 app-panel border-dashed">
                     <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />
-                    <p className="text-gray-500 dark:text-gray-400 font-medium">All settled up!</p>
-                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">No pending balances in the group.</p>
+                    <p className="text-muted-foreground font-medium">All settled up!</p>
+                    <p className="text-sm text-white/35 mt-1">No pending balances in the group.</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -445,22 +447,22 @@ export default function Balance() {
                         const fromMe = user?.id === s.from;
 
                         return (
-                            <div key={idx} className={`bg-card dark:bg-gray-800 p-4 rounded-2xl shadow-sm border ${isUserInvolved ? 'border-primary/30' : 'border-gray-100 dark:border-gray-700'}`}>
+                            <div key={idx} className={`bg-card p-4 rounded-2xl shadow-sm border ${isUserInvolved ? 'border-primary/50' : 'border-white/10'}`}>
                                 <div className="flex items-center justify-between">
 
                                     {/* Avatars & Names */}
                                     <div className="flex items-center space-x-3 flex-1 min-w-0">
-                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-gray-200" />
+                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                         <div className="flex flex-col items-center px-2">
-                                            <span className="text-[10px] text-gray-400 font-medium tracking-wider uppercase mb-1">Owes</span>
-                                            <ArrowRight className="w-4 h-4 text-gray-300" />
+                                            <span className="text-[10px] text-muted-foreground font-medium tracking-wider uppercase mb-1">Owes</span>
+                                            <ArrowRight className="w-4 h-4 text-white/25" />
                                         </div>
-                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-gray-200" />
+                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                     </div>
 
-                                    <div className="flex items-center space-x-4 pl-4 border-l border-gray-100 dark:border-gray-700 ml-2">
+                                    <div className="flex items-center space-x-4 pl-4 border-l border-[#1E1E1E] ml-2">
                                         <div className="text-right">
-                                            <span className="block font-bold text-gray-900 dark:text-white">₹{s.amount.toFixed(2)}</span>
+                                            <span className="block font-bold text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
                                         {(() => {
                                             const settlingKey = `${s.from}__${s.to}`;
@@ -477,7 +479,7 @@ export default function Balance() {
                                                         id={`settle-btn-full-${settlingKey}`}
                                                         onClick={() => openSettleModal(s.from, s.to, s.amount)}
                                                         disabled={isSettlingNow}
-                                                        className="bg-primary text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                                                        className="accent-button text-xs font-bold px-3 py-2 rounded-lg"
                                                     >
                                                         Settle
                                                     </button>
@@ -485,7 +487,7 @@ export default function Balance() {
                                             }
                                             if (isDebtor) {
                                                 return (
-                                                    <div className="text-[10px] text-gray-500 italic max-w-[80px] leading-tight text-center">
+                                                    <div className="text-[10px] text-muted-foreground italic max-w-[80px] leading-tight text-center">
                                                         Pending payment...
                                                     </div>
                                                 );
@@ -501,12 +503,12 @@ export default function Balance() {
                                     renderSettleModal(s.from, s.to, s.amount)
                                 }
 
-                                <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 text-center">
-                                    <span className={fromMe ? 'font-bold text-gray-900 dark:text-gray-200' : ''}>
+                                <div className="mt-3 text-sm text-muted-foreground text-center">
+                                    <span className={fromMe ? 'font-bold text-white' : ''}>
                                         {fromMe ? 'You' : getMemberName(s.from).split(' ')[0]}
                                     </span>
                                     {' owe '}
-                                    <span className={user?.id === s.to ? 'font-bold text-gray-900 dark:text-gray-200' : ''}>
+                                    <span className={user?.id === s.to ? 'font-bold text-white' : ''}>
                                         {user?.id === s.to ? 'You' : getMemberName(s.to).split(' ')[0]}
                                     </span>
                                 </div>

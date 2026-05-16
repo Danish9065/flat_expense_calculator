@@ -5,12 +5,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: '#6C63FF',
+        primary: '#FF5656',
         success: '#22C55E',
         danger: '#EF4444',
         warning: '#F59E0B',
-        background: '#F8F7FF',
-        card: '#FFFFFF',
+        background: '#050505',
+        card: '#0D0D0D',
+        muted: '#171717',
+        'muted-foreground': '#A3A3A3',
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

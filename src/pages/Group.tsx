@@ -248,21 +248,21 @@ export default function GroupPage() {
     if (!groupId && !isAdmin) {
         return (
             <div className="flex flex-col items-center justify-center p-8 text-center min-h-screen">
-                <Users className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">You're not in a group yet</h2>
-                <p className="text-gray-500 dark:text-gray-400 mt-2 mb-6">Ask your admin for an invite code</p>
+                <Users className="w-16 h-16 text-white/15 mb-4" />
+                <h2 className="text-xl font-bold text-white">You're not in a group yet</h2>
+                <p className="text-muted-foreground mt-2 mb-6">Ask your admin for an invite code</p>
                 <form onSubmit={handleJoinGroup} className="w-full max-w-sm space-y-3">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Invite Code</label>
+                        <label className="app-label mb-2 block">Invite Code</label>
                         <input
                             type="text" value={joinCode}
                             onChange={e => setJoinCode(e.target.value)}
                             placeholder="SPLIT-XXXX"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-primary focus:border-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center tracking-widest font-mono uppercase"
+                            className="dark-input px-4 py-2 rounded-xl text-center tracking-widest font-mono uppercase"
                         />
                     </div>
                     <button type="submit" disabled={joining || !joinCode.trim()}
-                        className="w-full py-2.5 px-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                        className="accent-button w-full py-2.5 px-4 rounded-xl font-medium">
                         {joining ? 'Joining...' : 'Join Group'}
                     </button>
                 </form>
@@ -271,14 +271,17 @@ export default function GroupPage() {
     }
 
     return (
-        <div className="pb-24 pt-6 px-4 max-w-lg mx-auto min-h-screen space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white">Group Details</h1>
+        <div className="app-section pb-28 min-h-screen space-y-6">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 text-center md:text-left mb-2">
+                <div>
+                    <p className="app-label mb-3">Flat and members</p>
+                    <h1 className="app-title">Group Details</h1>
+                </div>
                 {groups && groups.length > 1 && (
                     <select
                         value={groupId}
                         onChange={(e) => switchGroup(e.target.value)}
-                        className="bg-gray-50 dark:bg-gray-800 text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="dark-input text-sm font-medium rounded-lg px-3 py-2 focus:outline-none"
                     >
                         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                         {groups.map((g: any) => (
@@ -291,12 +294,12 @@ export default function GroupPage() {
             {groupId && (
                 <>
                     {/* Invite Code Section */}
-                    <div className="bg-card dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 text-center">
-                        <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                    <div className="app-panel p-6 lg:p-8 text-center">
+                        <h2 className="app-label mb-3">
                             Group Invite Code
                         </h2>
                         <div className="flex justify-center items-center space-x-3 mb-4">
-                            <span className="text-4xl font-mono font-black text-primary tracking-widest bg-primary/5 px-4 py-2 rounded-xl">
+                            <span className="text-4xl font-mono font-black text-primary tracking-widest bg-primary/10 px-4 py-2 rounded-xl border border-primary/20">
                                 {inviteCode}
                             </span>
                         </div>
@@ -304,7 +307,7 @@ export default function GroupPage() {
                         <div className="flex justify-center space-x-3">
                             <button
                                 onClick={copyToClipboard}
-                                className="flex items-center px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
+                                className="ghost-button flex items-center px-4 py-2 rounded-lg text-sm font-medium"
                             >
                                 <Copy className="w-4 h-4 mr-2" /> Copy
                             </button>
@@ -312,7 +315,7 @@ export default function GroupPage() {
                                 <button
                                     onClick={() => setConfirmRegenOpen(true)}
                                     disabled={regenerating}
-                                    className="flex items-center px-4 py-2 bg-danger/10 hover:bg-danger/20 text-danger rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                    className="flex items-center px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-sm font-medium transition-colors disabled:opacity-50 border border-primary/20"
                                 >
                                     <RefreshCw className={`w-4 h-4 mr-2 ${regenerating ? 'animate-spin' : ''}`} />
                                     Reset
@@ -324,13 +327,13 @@ export default function GroupPage() {
                     {/* Group Members */}
                     <div>
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center">
+                            <h2 className="text-lg font-bold text-white flex items-center">
                                 <Users className="w-5 h-5 mr-2 text-primary" />
                                 Members ({members.length})
                             </h2>
                         </div>
 
-                        <div className="bg-card dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-700">
+                        <div className="app-panel overflow-hidden divide-y divide-[#1E1E1E]">
                             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                             {members.map((member: any) => {
                                 const mUser = member.users;
@@ -342,7 +345,7 @@ export default function GroupPage() {
                                 return (
                                     <div key={member.user_id} className="p-4 flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
-                                            <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg overflow-hidden shrink-0">
+                                            <div className="w-10 h-10 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-lg overflow-hidden shrink-0">
                                                 {mUser?.avatar_url ? (
                                                     <img src={mUser.avatar_url} alt="" className="w-full h-full object-cover" />
                                                 ) : (
@@ -350,10 +353,10 @@ export default function GroupPage() {
                                                 )}
                                             </div>
                                             <div>
-                                                <p className="font-medium text-gray-900 dark:text-white">
+                                                <p className="font-medium text-white">
                                                     {mUser?.full_name || 'Unknown Member'}
                                                 </p>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px]">
+                                                <p className="text-xs text-muted-foreground truncate max-w-[180px]">
                                                     {mUser?.email || `ID: ${member.user_id.substring(0, 8)}...`}
                                                 </p>
                                             </div>
@@ -364,7 +367,7 @@ export default function GroupPage() {
                                                     <Shield className="w-3 h-3 mr-1" /> Admin
                                                 </span>
                                             ) : (
-                                                <span className="flex items-center text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 px-2 py-1 rounded-md">
+                                                <span className="flex items-center text-xs font-medium text-muted-foreground bg-white/[0.06] px-2 py-1 rounded-md">
                                                     <UserIcon className="w-3 h-3 mr-1" /> Member
                                                 </span>
                                             )}
@@ -380,7 +383,7 @@ export default function GroupPage() {
                         <button
                             onClick={exportToCSV}
                             disabled={exporting}
-                            className="w-full flex justify-center items-center py-3.5 px-4 border-2 border-primary text-primary hover:bg-primary hover:text-white rounded-xl shadow-sm text-sm font-bold focus:outline-none transition-colors disabled:opacity-50"
+                            className="w-full flex justify-center items-center py-3.5 px-4 border border-primary/40 text-primary hover:bg-primary hover:text-white rounded-xl shadow-sm text-sm font-bold focus:outline-none transition-colors disabled:opacity-50"
                         >
                             {exporting ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
                             Export All Expenses to CSV
@@ -391,22 +394,22 @@ export default function GroupPage() {
 
             {/* Join Another Group (Members Only) */}
             {!isAdmin && (
-                <div className="bg-card dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mt-8">
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center mb-1">
+                <div className="app-panel p-6 mt-8">
+                    <h2 className="text-lg font-bold text-white flex items-center mb-1">
                         Join Another Group
                     </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Got an invite code for a different flat?</p>
+                    <p className="app-subtitle mb-4">Got an invite code for a different flat?</p>
                     <form onSubmit={handleJoinGroup} className="space-y-3">
                         <div>
                             <input
                                 type="text" value={joinCode} required
                                 onChange={e => setJoinCode(e.target.value)}
                                 placeholder="SPLIT-XXXX"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-primary focus:border-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white tracking-widest font-mono uppercase"
+                                className="dark-input px-4 py-2 rounded-xl tracking-widest font-mono uppercase"
                             />
                         </div>
                         <button type="submit" disabled={joining || !joinCode.trim()}
-                            className="w-full py-2.5 px-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                            className="accent-button w-full py-2.5 px-4 rounded-xl font-medium">
                             {joining ? 'Joining...' : 'Join Group'}
                         </button>
                     </form>
@@ -415,21 +418,21 @@ export default function GroupPage() {
 
             {/* Admin: Create New Group */}
             {isAdmin && (
-                <div className="bg-card dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mt-8">
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center mb-1">
+                <div className="app-panel p-6 mt-8">
+                    <h2 className="text-lg font-bold text-white flex items-center mb-1">
                         Create Another Group
                     </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Manage multiple properties or flatmates</p>
+                    <p className="app-subtitle mb-4">Manage multiple properties or flatmates</p>
                     <form onSubmit={handleCreateGroup} className="space-y-3">
                         <div>
                             <input
                                 type="text" name="groupname" required
                                 placeholder="New Group Name"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-primary focus:border-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                className="dark-input px-4 py-2 rounded-xl"
                             />
                         </div>
                         <button type="submit" disabled={joining}
-                            className="w-full py-2.5 px-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                            className="accent-button w-full py-2.5 px-4 rounded-xl font-medium">
                             {joining ? 'Creating...' : 'Create New Group'}
                         </button>
                     </form>
