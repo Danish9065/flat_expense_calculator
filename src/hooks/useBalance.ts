@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
 import { dbQuery } from '../lib/db';
 
+interface ExpenseAmountRow {
+    amount: string | number;
+}
+
+interface ExpenseSplitAmountRow {
+    amount_owed: string | number;
+}
+
 export function useBalance(groupId: string | null, userId: string | null, category: string = 'All') {
     const [balance, setBalance] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -14,13 +22,13 @@ export function useBalance(groupId: string | null, userId: string | null, catego
             if (category !== 'All') paidQuery += `&category=eq.${category}`;
             const paid = await dbQuery('expenses', paidQuery);
 
-            const totalPaid = paid?.reduce((sum: number, e: any) => sum + parseFloat(e.amount), 0) ?? 0;
+            const totalPaid = (paid as ExpenseAmountRow[] | null)?.reduce((sum, e) => sum + parseFloat(String(e.amount)), 0) ?? 0;
 
             let owedQuery = `user_id=eq.${userId}&is_settled=eq.false&select=amount_owed,expenses!inner(category)`;
             if (category !== 'All') owedQuery += `&expenses.category=eq.${category}`;
             const owed = await dbQuery('expense_splits', owedQuery);
 
-            const totalOwed = owed?.reduce((sum: number, s: any) => sum + parseFloat(s.amount_owed), 0) ?? 0;
+            const totalOwed = (owed as ExpenseSplitAmountRow[] | null)?.reduce((sum, s) => sum + parseFloat(String(s.amount_owed)), 0) ?? 0;
 
             setBalance(parseFloat((totalPaid - totalOwed).toFixed(2)));
         } catch (e) { console.error(e) } finally {

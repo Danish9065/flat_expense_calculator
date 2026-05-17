@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { dbQuery } from '../lib/db';
-import insforge from '../lib/db';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, LogOut, Receipt } from 'lucide-react';
 import ActivityDrawer from './ActivityDrawer';

@@ -6,14 +6,28 @@ const insforge = createClient({
 });
 
 export function setAuthToken(token: string | null) {
-  // @ts-ignore - 'http' might be private in typescript definitions but works at runtime
+  // @ts-expect-error - 'http' might be private in typescript definitions but works at runtime
   insforge.http.userToken = token;
 }
 
 let isRefreshing = false;
 let refreshSubscribers: ((error?: Error) => void)[] = [];
 
-async function executeWithRetry(queryFn: () => Promise<any>): Promise<any> {
+interface QueryResult<T = unknown> {
+  data?: T;
+  error?: unknown;
+}
+
+type QueryBuilder = {
+  eq: (key: string, val: string) => QueryBuilder;
+  neq: (key: string, val: string) => QueryBuilder;
+  gt: (key: string, val: string) => QueryBuilder;
+  lt: (key: string, val: string) => QueryBuilder;
+  like: (key: string, val: string) => QueryBuilder;
+  in: (key: string, val: string[]) => QueryBuilder;
+};
+
+async function executeWithRetry<T = unknown>(queryFn: () => Promise<QueryResult<T>>): Promise<T | undefined> {
   let result = await queryFn();
 
   if (result.error) {
@@ -97,10 +111,10 @@ async function executeWithRetry(queryFn: () => Promise<any>): Promise<any> {
           console.error('Network offline, session dormant');
           throw new Error('Network offline, session dormant');
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         isRefreshing = false;
         let errorToThrow = e;
-        if (e.message !== 'Refresh token dead. Hard logged out.') {
+        if (!(e instanceof Error) || e.message !== 'Refresh token dead. Hard logged out.') {
           console.error('Network offline, session dormant', e);
           errorToThrow = new Error('Network offline, session dormant');
         }
@@ -151,7 +165,7 @@ function parseParams(params: string) {
   return { filters, selectVal, orderCol, orderAsc };
 }
 
-function applyFilters(query: any, filters: { key: string; op: string; val: string }[]) {
+function applyFilters(query: QueryBuilder, filters: { key: string; op: string; val: string }[]) {
   for (const f of filters) {
     if (f.op === 'eq') query = query.eq(f.key, f.val);
     if (f.op === 'neq') query = query.neq(f.key, f.val);

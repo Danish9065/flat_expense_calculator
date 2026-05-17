@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Bell, Download, Smartphone, X, Zap } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -54,8 +55,8 @@ export default function InstallPrompt() {
         style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(0,0,0,0.45)',
-          backdropFilter: 'blur(4px)',
+          background: 'rgba(0,0,0,0.72)',
+          backdropFilter: 'blur(10px)',
           zIndex: 9998,
           animation: 'ip-fade-in 0.25s ease',
         }}
@@ -72,10 +73,11 @@ export default function InstallPrompt() {
           left: '50%',
           transform: 'translateX(-50%)',
           width: 'min(420px, calc(100vw - 32px))',
-          background: 'linear-gradient(145deg, #ffffff 0%, #f5f3ff 100%)',
-          borderRadius: '24px',
-          padding: '32px 28px 28px',
-          boxShadow: '0 24px 60px rgba(108,99,255,0.25), 0 8px 24px rgba(0,0,0,0.12)',
+          background: 'linear-gradient(160deg, #141414 0%, #0D0D0D 52%, #080808 100%)',
+          border: '1px solid rgba(255,255,255,0.10)',
+          borderRadius: '20px',
+          padding: '30px 24px 24px',
+          boxShadow: '0 28px 80px rgba(0,0,0,0.55), 0 18px 45px rgba(255,86,86,0.10)',
           zIndex: 9999,
           display: 'flex',
           flexDirection: 'column',
@@ -93,8 +95,8 @@ export default function InstallPrompt() {
             position: 'absolute',
             top: '14px',
             right: '14px',
-            background: 'rgba(108,99,255,0.08)',
-            border: 'none',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.08)',
             borderRadius: '50%',
             width: '32px',
             height: '32px',
@@ -102,15 +104,19 @@ export default function InstallPrompt() {
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
-            color: '#6C63FF',
-            fontSize: '16px',
-            lineHeight: 1,
+            color: '#A3A3A3',
             transition: 'background 0.2s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(108,99,255,0.16)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(108,99,255,0.08)')}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(255,86,86,0.14)';
+            e.currentTarget.style.color = '#FFFFFF';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+            e.currentTarget.style.color = '#A3A3A3';
+          }}
         >
-          ✕
+          <X size={16} strokeWidth={2.4} />
         </button>
 
         {/* App Icon */}
@@ -118,27 +124,29 @@ export default function InstallPrompt() {
           style={{
             width: '72px',
             height: '72px',
-            borderRadius: '18px',
-            background: 'linear-gradient(135deg, #6C63FF 0%, #9D78FF 100%)',
+            borderRadius: '20px',
+            background: 'linear-gradient(135deg, #1E1E1E 0%, #080808 100%)',
+            border: '1px solid rgba(255,86,86,0.34)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 8px 24px rgba(108,99,255,0.35)',
+            boxShadow: '0 16px 40px rgba(255,86,86,0.18)',
             marginBottom: '4px',
           }}
         >
           <img
             src="/icon-192.png"
             alt="SplitMate"
-            style={{ width: '52px', height: '52px', borderRadius: '12px', objectFit: 'cover' }}
+            style={{ width: '54px', height: '54px', borderRadius: '14px', objectFit: 'cover' }}
             onError={e => {
-              // Fallback emoji icon if image fails
               (e.currentTarget as HTMLImageElement).style.display = 'none';
               const parent = e.currentTarget.parentElement;
               if (parent) {
                 const span = document.createElement('span');
-                span.textContent = '💜';
-                span.style.fontSize = '36px';
+                span.textContent = 'SM';
+                span.style.fontSize = '18px';
+                span.style.fontWeight = '700';
+                span.style.color = '#FF5656';
                 parent.appendChild(span);
               }
             }}
@@ -151,9 +159,9 @@ export default function InstallPrompt() {
             style={{
               margin: 0,
               fontSize: '20px',
-              fontWeight: 700,
-              color: '#1a1340',
-              letterSpacing: '-0.3px',
+              fontWeight: 600,
+              color: '#FFFFFF',
+              letterSpacing: '0',
             }}
           >
             Install SplitMate
@@ -162,7 +170,7 @@ export default function InstallPrompt() {
             style={{
               margin: '6px 0 0',
               fontSize: '14px',
-              color: '#6b6b8a',
+              color: '#A3A3A3',
               fontWeight: 400,
             }}
           >
@@ -180,19 +188,28 @@ export default function InstallPrompt() {
             margin: '4px 0',
           }}
         >
-          {['⚡ Works offline', '📲 Home screen', '🔔 Notifications'].map(f => (
+          {[
+            { label: 'Works offline', icon: Zap },
+            { label: 'Home screen', icon: Smartphone },
+            { label: 'Notifications', icon: Bell },
+          ].map(({ label, icon: Icon }) => (
             <span
-              key={f}
+              key={label}
               style={{
-                background: 'rgba(108,99,255,0.08)',
-                color: '#6C63FF',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#D4D4D4',
+                border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: '100px',
-                padding: '4px 12px',
+                padding: '5px 10px',
                 fontSize: '12px',
                 fontWeight: 500,
               }}
             >
-              {f}
+              <Icon size={13} color="#FF5656" />
+              {label}
             </span>
           ))}
         </div>
@@ -204,27 +221,32 @@ export default function InstallPrompt() {
           style={{
             width: '100%',
             padding: '14px',
-            background: 'linear-gradient(135deg, #6C63FF 0%, #9D78FF 100%)',
+            background: '#FF5656',
             color: '#fff',
             border: 'none',
-            borderRadius: '14px',
+            borderRadius: '12px',
             fontSize: '16px',
             fontWeight: 600,
             cursor: 'pointer',
-            letterSpacing: '0.2px',
-            boxShadow: '0 6px 20px rgba(108,99,255,0.4)',
+            letterSpacing: '0',
+            boxShadow: '0 14px 34px rgba(255,86,86,0.28)',
             transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             marginTop: '4px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.transform = 'translateY(-1px)';
-            e.currentTarget.style.boxShadow = '0 10px 28px rgba(108,99,255,0.5)';
+            e.currentTarget.style.boxShadow = '0 18px 40px rgba(255,86,86,0.36)';
           }}
           onMouseLeave={e => {
             e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 6px 20px rgba(108,99,255,0.4)';
+            e.currentTarget.style.boxShadow = '0 14px 34px rgba(255,86,86,0.28)';
           }}
         >
+          <Download size={18} strokeWidth={2.3} />
           Install App
         </button>
 
@@ -235,7 +257,7 @@ export default function InstallPrompt() {
           style={{
             background: 'none',
             border: 'none',
-            color: '#9d9db5',
+            color: '#A3A3A3',
             fontSize: '13px',
             cursor: 'pointer',
             padding: '4px 8px',
@@ -243,8 +265,8 @@ export default function InstallPrompt() {
             transition: 'color 0.2s',
             fontFamily: 'inherit',
           }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#6C63FF')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#9d9db5')}
+          onMouseEnter={e => (e.currentTarget.style.color = '#FFFFFF')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#A3A3A3')}
         >
           Continue without installing
         </button>

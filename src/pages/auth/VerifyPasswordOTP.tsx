@@ -58,9 +58,8 @@ export default function VerifyPasswordOTP() {
 
             success('OTP verified! Please set your new password.');
             navigate('/reset-password', { state: { resetToken: data.token, email } });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (err: any) {
-            showError(err.message || 'OTP verification failed');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'OTP verification failed');
         } finally {
             setLoading(false);
         }
@@ -72,35 +71,32 @@ export default function VerifyPasswordOTP() {
             const { error } = await insforge.auth.sendResetPasswordEmail({ email });
             if (error) throw new Error(error.message);
             success('OTP resent! Check your email.');
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (err: any) {
-            showError(err.message || 'Failed to resend OTP');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to resend OTP');
         } finally {
             setResending(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-            <div className="sm:mx-auto sm:w-full sm:max-w-md">
-                <div className="flex justify-center mb-4">
-                    <div className="bg-primary/10 p-3 rounded-full">
-                        <ShieldCheck className="h-8 w-8 text-primary" />
-                    </div>
+        <div className="auth-shell">
+            <div className="auth-header">
+                <div className="auth-mark">
+                    <ShieldCheck className="h-7 w-7" />
                 </div>
-                <h2 className="text-center text-3xl font-extrabold text-gray-900 dark:text-gray-100">
+                <h2 className="auth-heading">
                     Check your email
                 </h2>
-                <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+                <p className="auth-copy">
                     We sent a 6-digit code to<br />
-                    <span className="font-medium text-gray-900 dark:text-gray-100">{email}</span>
+                    <span className="font-medium text-white">{email}</span>
                 </p>
             </div>
 
-            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-                <div className="bg-card dark:bg-gray-800 py-8 px-4 shadow sm:rounded-2xl sm:px-10 border border-gray-100 dark:border-gray-700">
+            <div className="auth-card-wrap">
+                <div className="auth-card">
                     <form onSubmit={handleVerify} className="space-y-6">
-                        <div className="flex justify-center gap-3" onPaste={handlePaste}>
+                        <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
                             {otp.map((digit, i) => (
                                 <input
                                     key={i}
@@ -111,7 +107,7 @@ export default function VerifyPasswordOTP() {
                                     value={digit}
                                     onChange={e => handleChange(i, e.target.value)}
                                     onKeyDown={e => handleKeyDown(i, e)}
-                                    className="w-12 h-12 text-center text-xl font-bold border-2 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white transition-all"
+                                    className="otp-cell"
                                 />
                             ))}
                         </div>
@@ -119,12 +115,12 @@ export default function VerifyPasswordOTP() {
                         <button
                             type="submit"
                             disabled={otp.join('').length !== 6 || loading}
-                            className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                            className="auth-submit"
                         >
                             {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Verify OTP'}
                         </button>
 
-                        <p className="text-center text-sm text-gray-600 dark:text-gray-400">
+                        <p className="text-center text-sm text-muted-foreground">
                             Didn't receive the code?{' '}
                             <button
                                 type="button"
@@ -138,7 +134,7 @@ export default function VerifyPasswordOTP() {
                     </form>
 
                     <div className="mt-6">
-                        <Link to="/forgot-password" className="flex items-center justify-center text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                        <Link to="/forgot-password" className="auth-secondary-action">
                             <ArrowLeft className="w-4 h-4 mr-2" />
                             Back
                         </Link>

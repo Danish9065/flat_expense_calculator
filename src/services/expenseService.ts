@@ -5,14 +5,20 @@ export interface ExpenseData {
     category: string;
     item_name: string;
     amount: number;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    added_by: any; // User ID
+    added_by: string; // User ID
     note: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    receipt_url: any;
+    receipt_url: string | null;
     is_recurring: boolean;
     recur_type: 'weekly' | 'monthly' | null;
     splitBetween?: string[]; // Array of user_ids involved in the split
+}
+
+interface ExpenseRow extends ExpenseData {
+    id: string;
+}
+
+interface GroupMemberRow {
+    user_id: string;
 }
 
 /**
@@ -62,11 +68,12 @@ export const ExpenseService = {
 
 
     async addExpense(expenseData: ExpenseData) {
-        const { splitBetween, ...dbPayload } = expenseData;
+        const { splitBetween: _splitBetween, ...dbPayload } = expenseData;
+        void _splitBetween;
 
         const expenses = await dbInsert('expenses', dbPayload);
         if (!expenses || expenses.length === 0) throw new Error('Failed to add expense');
-        const expense = expenses[0] as any;
+        const expense = (expenses as ExpenseRow[])[0];
 
         let splitMemberIds = expenseData.splitBetween;
 
@@ -75,7 +82,7 @@ export const ExpenseService = {
             if (!members || members.length === 0) {
                 throw new Error('No members found in group');
             }
-            splitMemberIds = members.map((m: any) => m.user_id);
+            splitMemberIds = (members as GroupMemberRow[]).map((m) => m.user_id);
         }
 
         if (!splitMemberIds || splitMemberIds.length === 0) throw new Error('No members to split with');
@@ -93,14 +100,15 @@ export const ExpenseService = {
     },
 
     async editExpense(expenseId: string, updates: Partial<ExpenseData>) {
-        const { splitBetween, ...dbPayload } = updates;
+        const { splitBetween: _splitBetween, ...dbPayload } = updates;
+        void _splitBetween;
 
         const updatedExpenses = await dbUpdate('expenses', `id=eq.${expenseId}`, {
             ...dbPayload,
             updated_at: new Date().toISOString()
         });
         if (!updatedExpenses || updatedExpenses.length === 0) throw new Error('Failed to update expense');
-        const expense = updatedExpenses[0] as any;
+        const expense = (updatedExpenses as ExpenseRow[])[0];
 
         if (updates.amount !== undefined || updates.splitBetween !== undefined) {
             await dbDelete('expense_splits', `expense_id=eq.${expenseId}`);
@@ -110,7 +118,7 @@ export const ExpenseService = {
             if (!splitMemberIds || splitMemberIds.length === 0) {
                 const members = await dbQuery('group_members', `group_id=eq.${expense.group_id}&select=user_id`);
                 if (!members || members.length === 0) throw new Error('Failed to fetch members for split recalculation');
-                splitMemberIds = members.map((m: any) => m.user_id);
+                splitMemberIds = (members as GroupMemberRow[]).map((m) => m.user_id);
             }
 
             const totalAmount = updates.amount !== undefined ? updates.amount : expense.amount;

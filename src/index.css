@@ -57,6 +57,66 @@
     @apply w-full border border-white/10 bg-white/[0.04] text-white placeholder:text-white/30 focus:border-primary focus:ring-2 focus:ring-primary/25 outline-none transition;
   }
 
+  .auth-shell {
+    @apply min-h-screen flex flex-col justify-center px-4 py-8 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,#231111_0%,#050505_38%,#050505_100%)];
+  }
+
+  .auth-header {
+    @apply sm:mx-auto sm:w-full sm:max-w-md text-center;
+  }
+
+  .auth-mark {
+    @apply mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary shadow-[0_18px_50px_rgba(255,86,86,0.18)];
+  }
+
+  .auth-heading {
+    @apply text-3xl font-normal tracking-normal text-white;
+  }
+
+  .auth-copy {
+    @apply mt-2 text-sm leading-6 text-muted-foreground;
+  }
+
+  .auth-link {
+    @apply font-medium text-primary hover:text-primary/80 transition-colors;
+  }
+
+  .auth-card-wrap {
+    @apply mt-6 sm:mx-auto sm:w-full sm:max-w-md;
+  }
+
+  .auth-card {
+    @apply app-panel px-4 py-5 sm:px-8 sm:py-6;
+  }
+
+  .auth-label {
+    @apply block text-xs font-medium uppercase tracking-widest text-muted-foreground;
+  }
+
+  .auth-field {
+    @apply dark-input h-10 rounded-xl pl-10 pr-3 text-sm;
+  }
+
+  .auth-field-icon {
+    @apply pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground;
+  }
+
+  .auth-icon-button {
+    @apply absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-white focus:outline-none;
+  }
+
+  .auth-submit {
+    @apply accent-button flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold shadow-[0_14px_40px_rgba(255,86,86,0.22)] focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  .auth-secondary-action {
+    @apply flex items-center justify-center text-sm font-medium text-muted-foreground hover:text-white transition-colors;
+  }
+
+  .otp-cell {
+    @apply h-12 w-11 rounded-xl border border-white/10 bg-white/[0.04] text-center text-xl font-semibold text-white outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25 sm:w-12;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

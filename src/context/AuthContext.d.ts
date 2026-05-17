@@ -4,7 +4,7 @@ declare module '../context/AuthContext' {
         email?: string;
         full_name?: string;
         avatar_url?: string;
-        user_metadata?: Record<string, any>;
+        user_metadata?: Record<string, unknown>;
     }
 
     export interface AuthContextValue {

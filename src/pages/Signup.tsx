@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 // @ts-expect-error
 import insforge from '../lib/db';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { User, Mail, Lock, Key, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { User, Mail, Lock, Key, Eye, EyeOff, Loader2, ReceiptText } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 export default function Signup() {
@@ -67,39 +67,40 @@ export default function Signup() {
             success('OTP sent! Please verify your email.');
             // Send email, full name, and invite key to the OTP verification screen
             navigate('/verify-otp', { state: { email, fullName, inviteKey: keyData.key_code } });
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (err: any) {
-            showError(err.message || 'An unexpected error occurred');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'An unexpected error occurred');
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-            <div className="sm:mx-auto sm:w-full sm:max-w-md">
-                <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-gray-100">
+        <div className="auth-shell">
+            <div className="auth-header">
+                <div className="auth-mark">
+                    <ReceiptText className="h-7 w-7" />
+                </div>
+                <h2 className="auth-heading">
                     Create an account
                 </h2>
-                <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+                <p className="auth-copy">
                     Already have an account?{' '}
-                    <Link to="/login" className="font-medium text-primary hover:text-primary/80 transition-colors">
+                    <Link to="/login" className="auth-link">
                         Sign in instead
                     </Link>
                 </p>
             </div>
 
-            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-                <div className="bg-card dark:bg-gray-800 py-8 px-4 shadow sm:rounded-2xl sm:px-10 border border-gray-100 dark:border-gray-700">
-                    <form className="space-y-5" onSubmit={handleSignup}>
+            <div className="auth-card-wrap">
+                <div className="auth-card">
+                    <form className="space-y-4" onSubmit={handleSignup}>
 
                         {/* Invite Key */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invite Key</label>
-                            <div className="mt-1 relative rounded-md shadow-sm">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Key className="h-5 w-5 text-gray-400" />
+                            <label className="auth-label">Invite Key</label>
+                            <div className="mt-2 relative">
+                                <div className="auth-field-icon">
+                                    <Key className="h-5 w-5" />
                                 </div>
                                 <input
                                     required
@@ -107,17 +108,17 @@ export default function Signup() {
                                     value={inviteKey}
                                     placeholder="SPLIT-XXXXXX"
                                     onChange={(e) => setInviteKey(e.target.value.toUpperCase())}
-                                    className="block w-full pl-10 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary sm:text-sm font-mono uppercase dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    className="auth-field font-mono uppercase"
                                 />
                             </div>
                         </div>
 
                         {/* Full Name */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Full Name</label>
-                            <div className="mt-1 relative rounded-md shadow-sm">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <User className="h-5 w-5 text-gray-400" />
+                            <label className="auth-label">Full Name</label>
+                            <div className="mt-2 relative">
+                                <div className="auth-field-icon">
+                                    <User className="h-5 w-5" />
                                 </div>
                                 <input
                                     required
@@ -125,17 +126,17 @@ export default function Signup() {
                                     value={fullName}
                                     placeholder="John Doe"
                                     onChange={(e) => setFullName(e.target.value)}
-                                    className="block w-full pl-10 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    className="auth-field"
                                 />
                             </div>
                         </div>
 
                         {/* Email */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email address</label>
-                            <div className="mt-1 relative rounded-md shadow-sm">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Mail className="h-5 w-5 text-gray-400" />
+                            <label className="auth-label">Email address</label>
+                            <div className="mt-2 relative">
+                                <div className="auth-field-icon">
+                                    <Mail className="h-5 w-5" />
                                 </div>
                                 <input
                                     required
@@ -143,17 +144,17 @@ export default function Signup() {
                                     value={email}
                                     placeholder="you@example.com"
                                     onChange={(e) => setEmail(e.target.value)}
-                                    className="block w-full pl-10 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    className="auth-field"
                                 />
                             </div>
                         </div>
 
                         {/* Password */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-                            <div className="mt-1 relative rounded-md shadow-sm">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Lock className="h-5 w-5 text-gray-400" />
+                            <label className="auth-label">Password</label>
+                            <div className="mt-2 relative">
+                                <div className="auth-field-icon">
+                                    <Lock className="h-5 w-5" />
                                 </div>
                                 <input
                                     required
@@ -162,12 +163,12 @@ export default function Signup() {
                                     placeholder="••••••••"
                                     autoComplete="new-password"
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="block w-full pl-10 pr-10 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    className="auth-field pr-10"
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                                    className="auth-icon-button"
                                 >
                                     {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                 </button>
@@ -176,7 +177,7 @@ export default function Signup() {
                             {/* Password Strength Bar */}
                             {password.length > 0 && (
                                 <div className="mt-2 text-xs flex items-center justify-between">
-                                    <div className="flex gap-1 flex-1 mr-3 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                    <div className="flex gap-1 flex-1 mr-3 h-1.5 rounded-full bg-white/10 overflow-hidden">
                                         <div className={`h-full ${strength.color} transition-all duration-300 ease-out`} style={{ width: strength.label === 'Weak' ? '33%' : strength.label === 'Medium' ? '66%' : '100%' }}></div>
                                     </div>
                                     <span className={`font-medium ${strength.text}`}>{strength.label}</span>
@@ -186,10 +187,10 @@ export default function Signup() {
 
                         {/* Confirm Password */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Confirm Password</label>
-                            <div className="mt-1 relative rounded-md shadow-sm">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Lock className="h-5 w-5 text-gray-400" />
+                            <label className="auth-label">Confirm Password</label>
+                            <div className="mt-2 relative">
+                                <div className="auth-field-icon">
+                                    <Lock className="h-5 w-5" />
                                 </div>
                                 <input
                                     required
@@ -198,7 +199,7 @@ export default function Signup() {
                                     placeholder="••••••••"
                                     autoComplete="new-password"
                                     onChange={(e) => setConfirmPassword(e.target.value)}
-                                    className="block w-full pl-10 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    className="auth-field"
                                 />
                             </div>
                             {confirmPassword.length > 0 && password !== confirmPassword && (
@@ -210,7 +211,7 @@ export default function Signup() {
                             <button
                                 type="submit"
                                 disabled={!isFormValid}
-                                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                                className="auth-submit"
                             >
                                 {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Create Account'}
                             </button>
