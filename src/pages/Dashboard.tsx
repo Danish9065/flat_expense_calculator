@@ -12,19 +12,51 @@ import ConfirmModal from '../components/ConfirmModal';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 
+interface ExpenseSplitRow {
+    user_id: string;
+    amount_owed?: string | number;
+}
+
+interface ExpenseRow {
+    id: string;
+    added_by: string;
+    amount: string | number;
+    category?: string;
+    item_name: string;
+    note?: string | null;
+    receipt_url?: string | null;
+    created_at?: string;
+    expense_splits?: ExpenseSplitRow[];
+}
+
+interface GroupMemberRow {
+    user_id: string;
+    users?: {
+        full_name?: string;
+    };
+}
+
+interface ExpenseCardProps {
+    expense: ExpenseRow;
+    memberName: string;
+    splitNames: string;
+    onEdit: () => void;
+    onDelete: () => void;
+    isOwner: boolean;
+}
+
 export default function Dashboard() {
     const { user } = useAuth();
     const { currentGroup, members, groupId } = useGroup();
     const { success, error: showError } = useToast();
 
-    const [expenses, setExpenses] = useState<any[]>([]);
+    const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [filterMode, setFilterMode] = useState<string>('all');
 
     const [modalOpen, setModalOpen] = useState(false);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [editingExpense, setEditingExpense] = useState<any>(null);
+    const [editingExpense, setEditingExpense] = useState<ExpenseRow | null>(null);
 
     const [balances, setBalances] = useState({ totalPaid: 0, totalOwed: 0, netBalance: 0 });
 
@@ -50,7 +82,7 @@ export default function Dashboard() {
             const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed)`);
 
             if (expData) {
-                setExpenses(expData);
+                setExpenses(expData as ExpenseRow[]);
             }
 
             // Fetch Balances
@@ -62,7 +94,6 @@ export default function Dashboard() {
             setLoading(false);
             setIsRefreshing(false);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [groupId, user]);
 
     // Fix 4: re-fetch on group/user switch
@@ -92,8 +123,7 @@ export default function Dashboard() {
         if (!expenseToDelete) return;
         try {
             // Target the specific expense to see if it has a receipt
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const deletingExpense = expenses.find((e: any) => e.id === expenseToDelete);
+            const deletingExpense = expenses.find((e) => e.id === expenseToDelete);
 
             if (deletingExpense?.receipt_url) {
                 // The URL is usually structured as: .../storage/v1/object/public/receipts/{filename}
@@ -104,7 +134,7 @@ export default function Dashboard() {
                 if (fileName) {
                     await insforge.storage
                         .from('receipts')
-                        // @ts-ignore
+                        // @ts-expect-error - SDK remove expects its own file-path type but accepts a path array at runtime
                         .remove([fileName] as unknown as string);
                 }
             }
@@ -122,15 +152,13 @@ export default function Dashboard() {
     };
 
     const getMemberName = (id: string) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const m = members.find((mem: any) => mem.user_id === id);
+        const m = (members as GroupMemberRow[]).find((mem) => mem.user_id === id);
         return m?.users?.full_name || 'Someone';
     };
 
     // Resolve split_between user IDs to display names.
     // If all group members are included, returns "All".
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resolveSplitNames = (expense: any): string => {
+    const resolveSplitNames = (expense: ExpenseRow): string => {
         const splitEntries: { user_id: string }[] = expense.expense_splits || [];
         if (splitEntries.length === 0) return '';
         // Compare with total group members count
@@ -147,7 +175,7 @@ export default function Dashboard() {
 
     currentMonthExpenses.forEach(expense => {
         // Find the split for the current logged-in user
-        const userSplit = expense.expense_splits?.find((s: any) => s.user_id === user?.id);
+        const userSplit = expense.expense_splits?.find((s) => s.user_id === user?.id);
         const splitAmount = userSplit && userSplit.amount_owed ? Number(userSplit.amount_owed) : 0;
 
         exactYourShare += splitAmount;
@@ -301,8 +329,7 @@ export default function Dashboard() {
 }
 
 // Internal component for Expense Item
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner }: any) {
+function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner }: ExpenseCardProps) {
     const parsedDate = expense.created_at ? new Date(expense.created_at) : new Date();
     const [expanded, setExpanded] = useState(false);
 

@@ -13,7 +13,10 @@ import insforge from '../lib/db';
 export function useRealtimeSync(groupId: string | null, onDataChanged: () => void) {
   // Keep a stable ref so the effect closure always calls the latest version
   const onDataChangedRef = useRef(onDataChanged);
-  onDataChangedRef.current = onDataChanged;
+
+  useEffect(() => {
+    onDataChangedRef.current = onDataChanged;
+  }, [onDataChanged]);
 
   useEffect(() => {
     if (!groupId) return;

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import insforge from '../lib/db';
-import { dbQuery, dbInsert, dbUpdate, dbDelete } from '../lib/db';
+import { dbQuery, dbDelete } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useGroup } from '../context/GroupContext';
@@ -9,18 +9,34 @@ import { Key, Shield, RefreshCw, CheckCircle2, Clock, Trash2, Users, AlertTriang
 import { format } from 'date-fns';
 import ConfirmModal from '../components/ConfirmModal';
 
+interface InviteKeyRow {
+    id: string;
+    key_code: string;
+    is_used: boolean;
+    expires_at?: string | null;
+    created_at: string;
+    assigned_to?: string | null;
+    users?: { full_name?: string } | null;
+}
+
+interface AdminUserRow {
+    id: string;
+    full_name?: string;
+    role?: string;
+    created_at?: string;
+}
+
 export default function Admin() {
     const { user, role } = useAuth();
     const { groupId } = useGroup();
     const { success, error: showError } = useToast();
 
-    const [keys, setKeys] = useState<any[]>([]);
+    const [keys, setKeys] = useState<InviteKeyRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [assignToName, setAssignToName] = useState(''); // Added state for assigned_to text input
-    const [users, setUsers] = useState<any[]>([]);
-    const [userToDelete, setUserToDelete] = useState<any>(null);
-    const [deleting, setDeleting] = useState(false);
+    const [users, setUsers] = useState<AdminUserRow[]>([]);
+    const [userToDelete, setUserToDelete] = useState<AdminUserRow | null>(null);
     const [showDeleteAllExpenses, setShowDeleteAllExpenses] = useState(false);
     const [deletingExpenses, setDeletingExpenses] = useState(false);
 
@@ -32,41 +48,41 @@ export default function Admin() {
             await dbDelete('settlements', `group_id=eq.${groupId}`);
             success('All expenses and settlements deleted successfully!');
             setShowDeleteAllExpenses(false);
-        } catch (err: any) {
-            showError(err.message || 'Failed to delete expenses');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to delete expenses');
         } finally {
             setDeletingExpenses(false);
         }
     };
 
 
-    const fetchUsers = async () => {
+    const fetchUsers = useCallback(async () => {
         try {
             const data = await dbQuery('users', 'select=id,full_name,role,created_at&order=created_at.asc');
-            setUsers(data || []);
-        } catch (err: any) {
+            setUsers((data || []) as AdminUserRow[]);
+        } catch {
             showError('Failed to load users');
         }
-    };
+    }, [showError]);
 
-    const fetchKeys = async () => {
+    const fetchKeys = useCallback(async () => {
         try {
             setLoading(true);
             const data = await dbQuery('invite_keys', 'select=*,users!invite_keys_used_by_fkey(full_name)&order=created_at.desc');
-            setKeys(data || []);
-        } catch (err: any) {
+            setKeys((data || []) as InviteKeyRow[]);
+        } catch {
             showError('Failed to load invite keys');
         } finally {
             setLoading(false);
         }
-    };
+    }, [showError]);
 
     useEffect(() => {
         if (role === 'admin') {
             fetchKeys();
             fetchUsers();
         }
-    }, [role]);
+    }, [role, fetchKeys, fetchUsers]);
 
     const handleGenerateKey = async () => {
         if (!user) return;
@@ -87,8 +103,8 @@ export default function Admin() {
             success(`Generated new key: ${newKey}`);
             setAssignToName(''); // Clear input after success
             fetchKeys();
-        } catch (err: any) {
-            showError(err.message || 'Failed to generate key');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to generate key');
         } finally {
             setGenerating(false);
         }
@@ -96,7 +112,6 @@ export default function Admin() {
 
     const handleDeleteUser = async () => {
         if (!userToDelete) return;
-        setDeleting(true);
         try {
             // Database is heavily configured with ON DELETE CASCADE / SET NULL
             // Simply deleting the user will securely auto-wipe all associated splits and settlements
@@ -105,10 +120,8 @@ export default function Admin() {
             success(`${userToDelete.full_name} deleted successfully`);
             setUserToDelete(null);
             fetchUsers();
-        } catch (err: any) {
-            showError(err.message || 'Failed to delete user');
-        } finally {
-            setDeleting(false);
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to delete user');
         }
     };
 

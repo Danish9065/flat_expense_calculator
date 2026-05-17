@@ -1,10 +1,10 @@
-import { Home, Utensils, Receipt, ShoppingCart, Zap, Building } from 'lucide-react';
+import { Home, Utensils, Receipt, ShoppingCart, Zap, Building, type LucideIcon } from 'lucide-react';
 
 /**
  * Map of category name → icon component + Tailwind color classes.
  * Used in Dashboard (expense cards, filter tabs) and Balance (category breakdown).
  */
-export const CATEGORY_MAP: Record<string, { icon: any, colorClass: string }> = {
+export const CATEGORY_MAP: Record<string, { icon: LucideIcon, colorClass: string }> = {
     'Home':      { icon: Home,         colorClass: 'bg-primary/10 text-primary' },
     'Kitchen':   { icon: Utensils,     colorClass: 'bg-warning/10 text-warning' },
     'Groceries': { icon: ShoppingCart, colorClass: 'bg-success/10 text-success' },

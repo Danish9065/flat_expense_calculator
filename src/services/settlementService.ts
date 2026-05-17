@@ -1,4 +1,29 @@
-import insforge, { dbQuery, dbInsert } from '../lib/db';
+import insforge, { dbInsert } from '../lib/db';
+
+interface ExpenseBalanceRow {
+    id: string;
+    added_by: string;
+    amount: string | number;
+}
+
+interface ExpenseSplitBalanceRow {
+    user_id: string;
+    amount_owed: string | number;
+}
+
+interface SettlementBalanceRow {
+    paid_by: string;
+    paid_to: string;
+    amount: string | number;
+}
+
+interface GroupMemberRow {
+    user_id: string;
+    users?: {
+        full_name?: string;
+        avatar_url?: string;
+    };
+}
 
 export const SettlementService = {
     /**
@@ -13,10 +38,11 @@ export const SettlementService = {
 
         if (expensesError) throw new Error(expensesError.message);
 
-        const expenseIds = (expenses || []).map((e: any) => e.id);
+        const expenseRows = (expenses || []) as ExpenseBalanceRow[];
+        const expenseIds = expenseRows.map((e) => e.id);
 
         // Step 2: Get all expense splits
-        let splits: any[] = [];
+        let splits: ExpenseSplitBalanceRow[] = [];
         if (expenseIds.length > 0) {
             const { data: splitsData, error: splitsError } = await insforge.database
                 .from('expense_splits')
@@ -24,7 +50,7 @@ export const SettlementService = {
                 .in('expense_id', expenseIds);
             
             if (splitsError) throw new Error(splitsError.message);
-            splits = splitsData || [];
+            splits = (splitsData || []) as ExpenseSplitBalanceRow[];
         }
 
         // Step 3: Get all settlements
@@ -37,7 +63,7 @@ export const SettlementService = {
 
         let netBalance = 0;
 
-        for (const exp of expenses || []) {
+        for (const exp of expenseRows) {
             if (exp.added_by === userId) {
                 netBalance += Number(exp.amount);
             }
@@ -49,7 +75,7 @@ export const SettlementService = {
             }
         }
 
-        for (const s of settlements || []) {
+        for (const s of (settlements || []) as SettlementBalanceRow[]) {
             if (s.paid_by === userId) netBalance += Number(s.amount);
             if (s.paid_to === userId) netBalance -= Number(s.amount);
         }
@@ -148,7 +174,8 @@ export const SettlementService = {
     /**
      * Calculate who owes whom using the pure net balance approach.
      */
-    async calculateGroupSettlements(groupId: string, members?: any[], categoryFilter?: string) {
+    async calculateGroupSettlements(groupId: string, members?: GroupMemberRow[], categoryFilter?: string) {
+        void members;
         // Step 1: Get all expenses
         let expQuery = insforge.database.from('expenses').select('id, added_by, amount').eq('group_id', groupId);
         if (categoryFilter && categoryFilter !== 'All') {
@@ -157,10 +184,11 @@ export const SettlementService = {
         const { data: expenses, error: expensesError } = await expQuery;
         if (expensesError) throw new Error(expensesError.message);
 
-        const expenseIds = (expenses || []).map((e: any) => e.id);
+        const expenseRows = (expenses || []) as ExpenseBalanceRow[];
+        const expenseIds = expenseRows.map((e) => e.id);
 
         // Step 2: Get all expense splits
-        let splits: any[] = [];
+        let splits: ExpenseSplitBalanceRow[] = [];
         if (expenseIds.length > 0) {
             const { data: splitsData, error: splitsError } = await insforge.database
                 .from('expense_splits')
@@ -168,7 +196,7 @@ export const SettlementService = {
                 .in('expense_id', expenseIds);
             
             if (splitsError) throw new Error(splitsError.message);
-            splits = splitsData || [];
+            splits = (splitsData || []) as ExpenseSplitBalanceRow[];
         }
 
         // Step 3: Get all settlements
@@ -182,7 +210,7 @@ export const SettlementService = {
         // Compute net balance per user
         const net: Record<string, number> = {};
 
-        for (const exp of expenses || []) {
+        for (const exp of expenseRows) {
             const payer = exp.added_by;
             net[payer] = (net[payer] ?? 0) + Number(exp.amount);
         }
@@ -192,7 +220,7 @@ export const SettlementService = {
             net[uid] = (net[uid] ?? 0) - Number(split.amount_owed);
         }
 
-        for (const s of settlements || []) {
+        for (const s of (settlements || []) as SettlementBalanceRow[]) {
             net[s.paid_by] = (net[s.paid_by] ?? 0) + Number(s.amount);
             net[s.paid_to] = (net[s.paid_to] ?? 0) - Number(s.amount);
         }
@@ -216,4 +244,3 @@ export const SettlementService = {
         return SettlementService._minimizeNetBalances(net);
     },
 };
-

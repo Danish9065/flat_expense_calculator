@@ -12,6 +12,32 @@ import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSyn
 // Colors for the donut chart
 const COLORS = ['#6C63FF', '#22C55E', '#F59E0B', '#EF4444', '#06b6d4', '#8b5cf6', '#ec4899'];
 
+interface GroupMemberRow {
+    user_id: string;
+    users?: {
+        full_name?: string;
+        avatar_url?: string;
+    };
+}
+
+interface ExpenseChartRow {
+    added_by: string;
+    amount: string | number;
+    category: string;
+}
+
+interface ChartDatum {
+    name: string;
+    value: number;
+    color: string;
+}
+
+interface SettlementRow {
+    from: string;
+    to: string;
+    amount: number;
+}
+
 export default function Balance() {
     const { user } = useAuth();
     const { groupId, members } = useGroup();
@@ -25,13 +51,10 @@ export default function Balance() {
     const [settlingCard, setSettlingCard] = useState<string | null>(null); // `${from}__${to}`
     const [partialAmount, setPartialAmount] = useState<string>('');
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [chartData, setChartData] = useState<any[]>([]);
+    const [chartData, setChartData] = useState<ChartDatum[]>([]);
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [settlements, setSettlements] = useState<any[]>([]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [minimizedSettlements, setMinimizedSettlements] = useState<any[]>([]);
+    const [settlements, setSettlements] = useState<SettlementRow[]>([]);
+    const [minimizedSettlements, setMinimizedSettlements] = useState<SettlementRow[]>([]);
 
     const fetchBalanceData = useCallback(async (silent = false) => {
         if (!groupId) { setLoading(false); return; }
@@ -52,16 +75,16 @@ export default function Balance() {
                 const userTotals: Record<string, number> = {};
                 const catTotals: Record<string, number> = {};
 
-                expenses.forEach((e: any) => {
+                (expenses as ExpenseChartRow[]).forEach((e) => {
                     userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
                 });
 
-                const cData = members.map((m: any, index: number) => ({
+                const cData = (members as GroupMemberRow[]).map((m, index) => ({
                     name: m.users?.full_name?.split(' ')[0] || 'Member',
                     value: userTotals[m.user_id] || 0,
                     color: COLORS[index % COLORS.length]
-                })).filter((d: any) => d.value > 0);
+                })).filter((d) => d.value > 0);
 
                 setChartData(cData);
                 setCategoryTotals(catTotals);
@@ -78,7 +101,6 @@ export default function Balance() {
             setLoading(false);
             setIsRefreshing(false);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [groupId, members, category]);
 
     // Fix 4: re-fetch on group/category switch
@@ -127,9 +149,8 @@ export default function Balance() {
             if (groupId) await notifyGroupDataChanged(groupId);
             window.dispatchEvent(new CustomEvent('settle-complete'));
             await fetchBalanceData();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (err: any) {
-            showError(err.message || 'Failed to settle up');
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to settle up');
         } finally {
             setSettling(null);
         }
@@ -215,11 +236,11 @@ export default function Balance() {
     };
 
     const getMemberName = (id: string) => {
-        return members.find((m: any) => m.user_id === id)?.users?.full_name || 'Someone';
+        return (members as GroupMemberRow[]).find((m) => m.user_id === id)?.users?.full_name || 'Someone';
     };
 
     const getMemberAvatar = (id: string) => {
-        const url = members.find((m: any) => m.user_id === id)?.users?.avatar_url;
+        const url = (members as GroupMemberRow[]).find((m) => m.user_id === id)?.users?.avatar_url;
         if (url) return url;
         // fallback avatar based on name
         const name = getMemberName(id);

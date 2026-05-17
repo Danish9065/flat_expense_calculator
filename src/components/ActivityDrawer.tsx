@@ -23,7 +23,7 @@ interface ActivityEvent {
 }
 
 export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: ActivityDrawerProps) {
-    const { groupId, members } = useGroup();
+    useGroup();
     const { user } = useAuth();
     const [activities, setActivities] = useState<ActivityEvent[]>([]);
 
@@ -80,13 +80,6 @@ export default function ActivityDrawer({ isOpen, onClose, onUnreadChange }: Acti
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
-
-    const getMemberName = (id: string) => {
-        if (!id) return 'Someone';
-        if (id === user?.id) return 'You';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return members.find((m: any) => m.user_id === id)?.users?.full_name?.split(' ')[0] || 'Someone';
-    };
 
     return (
         <>
