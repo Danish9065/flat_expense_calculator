@@ -80,6 +80,7 @@ export default function Balance() {
                     userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
                 });
+            }
 
             // 2. Settlement Data: "How to settle up"
             const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, members, category);
