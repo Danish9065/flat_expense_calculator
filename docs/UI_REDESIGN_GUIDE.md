@@ -447,9 +447,9 @@ PWA and global UI:
 - Activity drawer marks notifications read.
 - Toasts appear and dismiss.
 
-## Implementation Notes For Future Agents
+## Implementation Notes
 
-- If editing InsForge integration code, fetch current InsForge docs first as required by `AGENTS.md`.
+- If editing InsForge integration code, consult the current InsForge documentation first.
 - For UI-only edits, documentation fetch is not necessary unless backend SDK calls are changed.
 - Prefer keeping handler names and JSX conditionals recognizable to reduce regression risk.
 - When extracting components, pass existing handlers down rather than rewriting logic.
@@ -461,4 +461,3 @@ PWA and global UI:
   - `confirm-settle-{from}__{to}`
   - `pwa-install-btn`
   - `pwa-dismiss-btn`
-

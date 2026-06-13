@@ -19,7 +19,6 @@ Important rule for future UI work: change presentation only. Keep the routes, co
 | `public/sw.js` | Service worker with network-first HTML caching and cache-first asset caching. Excludes InsForge/API requests. |
 | `sql_script.sql` | SQL for notifications and database triggers. Note: the settlement trigger appears to reference `from_user_id`/`to_user_id`, while app code writes `paid_by`/`paid_to`; verify before applying it to a backend. |
 | `test_*.js` / `recover_admin.mjs` | Local backend/test/debug helper scripts. |
-| `AGENTS.md` | Project instructions for InsForge work. |
 
 ## Source Layout
 
@@ -274,4 +273,3 @@ Storage buckets used:
 RPC used:
 
 - `consume_invite_key`
-
