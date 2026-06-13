@@ -5,9 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useGroup } from '../context/GroupContext';
 import { generateInviteKey } from '../utils/invite';
-import { Key, Shield, RefreshCw, CheckCircle2, Clock, Trash2, Users, AlertTriangle } from 'lucide-react';
+import { Key, Shield, RefreshCw, CheckCircle2, Clock, Trash2, Users, AlertTriangle, UserMinus } from 'lucide-react';
 import { format } from 'date-fns';
 import ConfirmModal from '../components/ConfirmModal';
+import { notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+import { SettlementService } from '../services/settlementService';
 
 interface InviteKeyRow {
     id: string;
@@ -28,7 +30,7 @@ interface AdminUserRow {
 
 export default function Admin() {
     const { user, role } = useAuth();
-    const { groupId } = useGroup();
+    const { groupId, refreshGroup, members } = useGroup();
     const { success, error: showError } = useToast();
 
     const [keys, setKeys] = useState<InviteKeyRow[]>([]);
@@ -37,6 +39,8 @@ export default function Admin() {
     const [assignToName, setAssignToName] = useState(''); // Added state for assigned_to text input
     const [users, setUsers] = useState<AdminUserRow[]>([]);
     const [userToDelete, setUserToDelete] = useState<AdminUserRow | null>(null);
+    const [userToRemove, setUserToRemove] = useState<AdminUserRow | null>(null);
+    const [removeWarning, setRemoveWarning] = useState<string>('');
     const [showDeleteAllExpenses, setShowDeleteAllExpenses] = useState(false);
     const [deletingExpenses, setDeletingExpenses] = useState(false);
 
@@ -120,8 +124,57 @@ export default function Admin() {
             success(`${userToDelete.full_name} deleted successfully`);
             setUserToDelete(null);
             fetchUsers();
+            
+            // Refresh group context and notify other clients so the user is instantly removed from UI
+            if (refreshGroup) {
+                await refreshGroup();
+            }
+            if (groupId) {
+                await notifyGroupDataChanged(groupId);
+            }
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'Failed to delete user');
+        }
+    };
+
+    const checkAndPromptRemove = async (u: AdminUserRow) => {
+        try {
+            const calcSettlements = await SettlementService.calculateGroupSettlements(groupId || '', members, 'All');
+            let owes = 0;
+            let owed = 0;
+            calcSettlements.forEach(s => {
+                if (s.from === u.id) owes += s.amount;
+                if (s.to === u.id) owed += s.amount;
+            });
+
+            if (owes > 0 || owed > 0) {
+                let msg = `${u.full_name} `;
+                if (owes > 0 && owed > 0) msg += `still owes ₹${owes.toFixed(2)} and is owed ₹${owed.toFixed(2)}. `;
+                else if (owes > 0) msg += `still owes ₹${owes.toFixed(2)}. `;
+                else msg += `is still owed ₹${owed.toFixed(2)}. `;
+                msg += "Removing them will preserve this debt as 'Pending Settlement' in the Balances tab. Continue?";
+                setRemoveWarning(msg);
+            } else {
+                setRemoveWarning(`Are you sure you want to remove ${u.full_name} from this group? Their past expenses will remain but they will lose access.`);
+            }
+            setUserToRemove(u);
+        } catch (err) {
+            showError('Failed to check balances');
+        }
+    };
+
+    const handleRemoveFromGroup = async () => {
+        if (!userToRemove || !groupId) return;
+        try {
+            await dbDelete('group_members', `group_id=eq.${groupId}&user_id=eq.${userToRemove.id}`);
+            success(`${userToRemove.full_name} removed from the group successfully`);
+            setUserToRemove(null);
+            fetchUsers();
+            
+            if (refreshGroup) await refreshGroup();
+            await notifyGroupDataChanged(groupId);
+        } catch (err: unknown) {
+            showError(err instanceof Error ? err.message : 'Failed to remove user from group');
         }
     };
 
@@ -239,12 +292,22 @@ export default function Admin() {
                                 <p className="text-xs text-muted-foreground capitalize">{u.role}</p>
                             </div>
                             {u.id !== user?.id && (
-                                <button
-                                    onClick={() => setUserToDelete(u)}
-                                    className="p-2 text-primary hover:text-primary/80 hover:bg-primary/10 rounded-lg transition-colors"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => checkAndPromptRemove(u)}
+                                        className="p-2 text-warning hover:text-warning/80 hover:bg-warning/10 rounded-lg transition-colors"
+                                        title="Remove from Group"
+                                    >
+                                        <UserMinus className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => setUserToDelete(u)}
+                                        className="p-2 text-primary hover:text-primary/80 hover:bg-primary/10 rounded-lg transition-colors"
+                                        title="Delete Entire Account"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
                             )}
                         </div>
                     ))}
@@ -285,6 +348,17 @@ export default function Admin() {
                 title="Delete User"
                 confirmText="Delete"
                 message={`Are you sure you want to permanently delete ${userToDelete?.full_name}? This will also remove them from the group.`}
+                isDestructive={true}
+            />
+
+            <ConfirmModal
+                isOpen={!!userToRemove}
+                onClose={() => setUserToRemove(null)}
+                onConfirm={handleRemoveFromGroup}
+                title="Remove User from Group"
+                message={removeWarning}
+                confirmText="Remove from Group"
+                isDestructive={true}
             />
 
             <ConfirmModal

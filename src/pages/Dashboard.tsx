@@ -15,6 +15,9 @@ import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSyn
 interface ExpenseSplitRow {
     user_id: string;
     amount_owed?: string | number;
+    users?: {
+        full_name?: string;
+    };
 }
 
 interface ExpenseRow {
@@ -27,6 +30,9 @@ interface ExpenseRow {
     receipt_url?: string | null;
     created_at?: string;
     expense_splits?: ExpenseSplitRow[];
+    users?: {
+        full_name?: string;
+    };
 }
 
 interface GroupMemberRow {
@@ -79,7 +85,7 @@ export default function Dashboard() {
 
         try {
             // Fetch expenses
-            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed)`);
+            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed,users(full_name))`);
 
             if (expData) {
                 setExpenses(expData as ExpenseRow[]);
@@ -151,19 +157,25 @@ export default function Dashboard() {
         }
     };
 
-    const getMemberName = (id: string) => {
+    const getMemberName = (id: string, fallbackName?: string) => {
         const m = (members as GroupMemberRow[]).find((mem) => mem.user_id === id);
-        return m?.users?.full_name || 'Someone';
+        if (m?.users?.full_name) return m.users.full_name;
+        if (fallbackName) return `${fallbackName} (Removed)`;
+        return 'Unknown User (Removed)';
     };
 
     // Resolve split_between user IDs to display names.
     // If all group members are included, returns "All".
     const resolveSplitNames = (expense: ExpenseRow): string => {
-        const splitEntries: { user_id: string }[] = expense.expense_splits || [];
+        const splitEntries: ExpenseSplitRow[] = expense.expense_splits || [];
         if (splitEntries.length === 0) return '';
         // Compare with total group members count
-        if (splitEntries.length >= members.length && members.length > 0) return 'All';
-        return splitEntries.map((s) => getMemberName(s.user_id)).join(', ');
+        if (splitEntries.length >= members.length && members.length > 0) {
+            // Check if all active members are in the split
+            const allActiveIncluded = members.every(m => splitEntries.some(s => s.user_id === m.user_id));
+            if (allActiveIncluded && splitEntries.length === members.length) return 'All';
+        }
+        return splitEntries.map((s) => getMemberName(s.user_id, s.users?.full_name)).join(', ');
     };
 
     // Stats calculation
@@ -282,7 +294,7 @@ export default function Dashboard() {
                         <ExpenseCard
                             key={expense.id}
                             expense={expense}
-                            memberName={getMemberName(expense.added_by)}
+                            memberName={getMemberName(expense.added_by, expense.users?.full_name)}
                             splitNames={resolveSplitNames(expense)}
                             onEdit={() => { setEditingExpense(expense); setModalOpen(true); }}
                             onDelete={() => setExpenseToDelete(expense.id)}

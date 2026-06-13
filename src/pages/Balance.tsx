@@ -55,6 +55,7 @@ export default function Balance() {
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
     const [settlements, setSettlements] = useState<SettlementRow[]>([]);
     const [minimizedSettlements, setMinimizedSettlements] = useState<SettlementRow[]>([]);
+    const [fallbackUsers, setFallbackUsers] = useState<Record<string, { full_name?: string }>>({});
 
     const fetchBalanceData = useCallback(async (silent = false) => {
         if (!groupId) { setLoading(false); return; }
@@ -80,18 +81,49 @@ export default function Balance() {
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
                 });
 
-                const cData = (members as GroupMemberRow[]).map((m, index) => ({
-                    name: m.users?.full_name?.split(' ')[0] || 'Member',
-                    value: userTotals[m.user_id] || 0,
-                    color: COLORS[index % COLORS.length]
-                })).filter((d) => d.value > 0);
-
-                setChartData(cData);
-                setCategoryTotals(catTotals);
-            }
-
             // 2. Settlement Data: "How to settle up"
             const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, members, category);
+
+            // 3. Fallback users for removed members
+            const missingIds = new Set<string>();
+            Object.keys(userTotals).forEach(id => {
+                if (!members.find(m => m.user_id === id)) missingIds.add(id);
+            });
+            calcSettlements.forEach(s => {
+                if (!members.find(m => m.user_id === s.from)) missingIds.add(s.from);
+                if (!members.find(m => m.user_id === s.to)) missingIds.add(s.to);
+            });
+
+            let fMap: Record<string, { full_name?: string }> = {};
+            if (missingIds.size > 0) {
+                const idsArray = Array.from(missingIds);
+                const missingUsersData = await dbQuery('users', `id=in.(${idsArray.join(',')})&select=id,full_name`);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (missingUsersData as any[])?.forEach(u => fMap[u.id] = u);
+                setFallbackUsers(fMap);
+            } else {
+                setFallbackUsers({});
+            }
+
+            const allIds = Array.from(new Set([...members.map(m => m.user_id), ...Object.keys(userTotals)]));
+            const cData = allIds.map((id, index) => {
+                const active = members.find(m => m.user_id === id);
+                let name = 'Member';
+                if (active?.users?.full_name) {
+                    name = active.users.full_name.split(' ')[0];
+                } else if (fMap[id]?.full_name) {
+                    name = fMap[id].full_name.split(' ')[0] + ' (Removed)';
+                }
+                
+                return {
+                    name,
+                    value: userTotals[id] || 0,
+                    color: COLORS[index % COLORS.length]
+                };
+            }).filter((d) => d.value > 0);
+
+            setChartData(cData);
+            setCategoryTotals(catTotals);
             setSettlements(calcSettlements);
             setMinimizedSettlements(calcSettlements);
 
@@ -236,7 +268,10 @@ export default function Balance() {
     };
 
     const getMemberName = (id: string) => {
-        return (members as GroupMemberRow[]).find((m) => m.user_id === id)?.users?.full_name || 'Someone';
+        const active = (members as GroupMemberRow[]).find((m) => m.user_id === id);
+        if (active?.users?.full_name) return active.users.full_name;
+        if (fallbackUsers[id]?.full_name) return `${fallbackUsers[id].full_name} (Removed)`;
+        return 'Unknown User (Removed)';
     };
 
     const getMemberAvatar = (id: string) => {
