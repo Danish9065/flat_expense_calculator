@@ -72,10 +72,10 @@ export default function Balance() {
             if (category !== 'All') expQuery += `&category=eq.${category}`;
             const expenses = await dbQuery('expenses', expQuery);
 
-            if (expenses) {
-                const userTotals: Record<string, number> = {};
-                const catTotals: Record<string, number> = {};
+            const userTotals: Record<string, number> = {};
+            const catTotals: Record<string, number> = {};
 
+            if (expenses) {
                 (expenses as ExpenseChartRow[]).forEach((e) => {
                     userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);

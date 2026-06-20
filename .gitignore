@@ -27,3 +27,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Custom ignored files
+asad_calculation.*
