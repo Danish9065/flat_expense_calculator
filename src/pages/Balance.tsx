@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
 import { dbQuery } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, RefreshCw } from 'lucide-react';
+import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, RefreshCw, FileSearch } from 'lucide-react';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+
+const CalculationReport = lazy(() => import('../components/CalculationReport'));
 
 // Colors for the donut chart
 const COLORS = ['#6C63FF', '#22C55E', '#F59E0B', '#EF4444', '#06b6d4', '#8b5cf6', '#ec4899'];
@@ -40,7 +42,7 @@ interface SettlementRow {
 
 export default function Balance() {
     const { user } = useAuth();
-    const { groupId, members } = useGroup();
+    const { groupId, groupName, members } = useGroup();
     const { success, error: showError } = useToast();
 
     const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export default function Balance() {
     // Partial payment state
     const [settlingCard, setSettlingCard] = useState<string | null>(null); // `${from}__${to}`
     const [partialAmount, setPartialAmount] = useState<string>('');
+    const [showCalculationReport, setShowCalculationReport] = useState(false);
 
     const [chartData, setChartData] = useState<ChartDatum[]>([]);
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
@@ -95,7 +98,7 @@ export default function Balance() {
                 if (!members.find(m => m.user_id === s.to)) missingIds.add(s.to);
             });
 
-            let fMap: Record<string, { full_name?: string }> = {};
+            const fMap: Record<string, { full_name?: string }> = {};
             if (missingIds.size > 0) {
                 const idsArray = Array.from(missingIds);
                 const missingUsersData = await dbQuery('users', `id=in.(${idsArray.join(',')})&select=id,full_name`);
@@ -283,6 +286,8 @@ export default function Balance() {
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
     };
 
+    const closeCalculationReport = useCallback(() => setShowCalculationReport(false), []);
+
     if (loading) {
         return <div className="flex h-[80vh] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
     }
@@ -296,11 +301,21 @@ export default function Balance() {
 
     return (
         <div className="app-section pb-28 min-h-screen">
-            <div className="text-center mb-8">
-                <p className="app-label mb-3">Group settlement calculator</p>
-                <h1 className="app-title">Balances</h1>
+            <div className="mb-8 flex flex-col items-center justify-between gap-5 text-center sm:flex-row sm:text-left">
+                <div>
+                    <p className="app-label mb-3">Group settlement calculator</p>
+                    <h1 className="app-title">Balances</h1>
+                </div>
+                <button
+                    id="open-calculation-report"
+                    onClick={() => setShowCalculationReport(true)}
+                    className="ghost-button inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold sm:w-auto"
+                >
+                    <FileSearch className="h-4 w-4 text-primary" />
+                    Explain this calculation
+                </button>
                 {isRefreshing && (
-                    <span className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground animate-pulse">
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground animate-pulse sm:absolute sm:right-4 sm:top-24">
                         <RefreshCw className="w-3 h-3 animate-spin" />
                         Updating...
                     </span>
@@ -573,6 +588,19 @@ export default function Balance() {
                         );
                     })}
                 </div>
+            )}
+
+            {showCalculationReport && (
+                <Suspense fallback={<div className="fixed inset-0 z-[100] grid place-items-center bg-black/80"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+                    <CalculationReport
+                        groupId={groupId}
+                        groupName={groupName}
+                        category={category}
+                        members={members}
+                        fallbackUsers={fallbackUsers}
+                        onClose={closeCalculationReport}
+                    />
+                </Suspense>
             )}
         </div>
     );

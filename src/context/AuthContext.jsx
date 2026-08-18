@@ -1,30 +1,25 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import insforge, { dbQuery, setAuthToken } from '../lib/db';
+import {
+  AUTH_STORAGE_KEY,
+  clearPersistentSession,
+  isAccessTokenExpiring,
+  readPersistentSession,
+  refreshPersistentSession,
+  writePersistentSession,
+} from '../lib/authSession';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   // Optimistically load user data from localStorage and set token synchronously
   const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('splitmate-user');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.token) {
-          setAuthToken(parsed.token);
-        }
-        return parsed.user || null;
-      }
-      return null;
-    } catch { return null; }
+    const saved = readPersistentSession();
+    if (saved?.token) setAuthToken(saved.token);
+    return saved?.user || null;
   });
 
-  const [role, setRole] = useState(() => {
-    try {
-      const saved = localStorage.getItem('splitmate-user');
-      return saved ? JSON.parse(saved).role : null;
-    } catch { return null; }
-  });
+  const [role, setRole] = useState(() => readPersistentSession()?.role || null);
 
   // If we have a cached user, don't show the loading screen initially
   const [loading, setLoading] = useState(!user);
@@ -32,7 +27,7 @@ export function AuthProvider({ children }) {
   // Global log out listener for interceptors
   useEffect(() => {
     const handleLogout = () => {
-      localStorage.removeItem('splitmate-user');
+      clearPersistentSession();
       setAuthToken(null);
       if ('caches' in window) {
         caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
@@ -44,62 +39,42 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('auth:logout', handleLogout);
   }, []);
 
+  // Keep every open tab in sync. Removing the session in one tab logs out the others;
+  // token rotations and profile updates are also adopted without a reload.
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key !== AUTH_STORAGE_KEY) return;
+      const saved = readPersistentSession();
+      setAuthToken(saved?.token || null);
+      setUser(saved?.user || null);
+      setRole(saved?.role || null);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
     const validateSessionSilently = async () => {
       try {
-        const saved = localStorage.getItem('splitmate-user');
-        if (!saved) {
+        const parsed = readPersistentSession();
+        if (!parsed) {
           if (mounted) setLoading(false);
           return;
         }
 
-        const parsed = JSON.parse(saved);
         const sessionUser = parsed.user;
         let token = parsed.token;
-        const refreshToken = parsed.refreshToken;
 
         if (token && sessionUser) {
-          // Proactive Refresh if expired on load
-          const isTokenExpired = () => {
-            try {
-              const payload = JSON.parse(atob(token.split('.')[1]));
-              return payload.exp * 1000 < Date.now() + 5000;
-            } catch { return true; }
-          };
-
-          if (isTokenExpired() && refreshToken) {
-            let res;
-            try {
-              const backendUrl = import.meta.env.VITE_INSFORGE_URL;
-              res = await fetch(`${backendUrl}/api/auth/refresh?client_type=mobile`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'apikey': import.meta.env.VITE_INSFORGE_ANON_KEY
-                },
-                body: JSON.stringify({ refreshToken })
-              });
-            } catch (networkErr) {
-              console.error('Network offline, session dormant', networkErr);
-            }
-
-            if (res) {
-              try {
-                const resData = await res.json();
-                if (res.ok && resData.accessToken && resData.refreshToken) {
-                  token = resData.accessToken;
-                  setAuthToken(token);
-                  parsed.token = token;
-                  parsed.refreshToken = resData.refreshToken;
-                  localStorage.setItem('splitmate-user', JSON.stringify(parsed));
-                } else {
-                  console.error('Network offline, session dormant');
-                }
-              } catch (jsonErr) {
-                console.error('Network offline, session dormant', jsonErr);
-              }
+          // Refresh before validation when a restored access token is near expiry.
+          if (isAccessTokenExpiring(token, 60_000)) {
+            const refreshResult = await refreshPersistentSession();
+            if (refreshResult.status === 'refreshed') {
+              token = refreshResult.session.token;
+              parsed.refreshToken = refreshResult.session.refreshToken;
+              setAuthToken(token);
             }
           }
 
@@ -119,12 +94,12 @@ export function AuthProvider({ children }) {
               setUser(updatedUser);
               setRole(userRole);
 
-              localStorage.setItem('splitmate-user', JSON.stringify({
+              writePersistentSession({
                 user: updatedUser,
                 role: userRole,
                 token,
                 refreshToken: parsed.refreshToken
-              }));
+              });
             }
           } catch (e) {
             console.error('Failed fetching fresh user data silently', e);
@@ -150,6 +125,30 @@ export function AuthProvider({ children }) {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  // Refresh in the background while the app is open, and immediately after the
+  // device reconnects or the user returns to the tab.
+  useEffect(() => {
+    const keepSessionFresh = async () => {
+      const saved = readPersistentSession();
+      if (!saved || !isAccessTokenExpiring(saved.token, 5 * 60_000)) return;
+      const result = await refreshPersistentSession();
+      if (result.status === 'refreshed') setAuthToken(result.session.token);
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void keepSessionFresh();
+    };
+    const intervalId = window.setInterval(() => void keepSessionFresh(), 4 * 60_000);
+    window.addEventListener('online', keepSessionFresh);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('online', keepSessionFresh);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
@@ -184,12 +183,12 @@ export function AuthProvider({ children }) {
 
     setUser(data.user);
     setRole(userRole);
-    localStorage.setItem('splitmate-user', JSON.stringify({
+    writePersistentSession({
       user: data.user,
       role: userRole,
       token: data.accessToken, // Save token for optimistic loading
       refreshToken: data.refreshToken
-    }));
+    });
     window.location.replace(userRole === 'admin' ? '/admin' : '/dashboard');
   };
 

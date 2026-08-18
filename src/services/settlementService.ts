@@ -15,6 +15,44 @@ interface SettlementBalanceRow {
     paid_by: string;
     paid_to: string;
     amount: string | number;
+    settled_at?: string;
+    is_partial?: boolean;
+}
+
+interface ExplanationExpenseRow extends ExpenseBalanceRow {
+    item_name?: string;
+    category?: string;
+    created_at?: string;
+}
+
+interface ExplanationSplitRow extends ExpenseSplitBalanceRow {
+    expense_id: string;
+}
+
+export interface MemberCalculationRow {
+    userId: string;
+    paid: number;
+    assignedShare: number;
+    paymentsMade: number;
+    paymentsReceived: number;
+    netBalance: number;
+}
+
+export interface CalculationExplanation {
+    generatedAt: string;
+    category: string;
+    expenses: ExplanationExpenseRow[];
+    splits: ExplanationSplitRow[];
+    priorPayments: SettlementBalanceRow[];
+    memberRows: MemberCalculationRow[];
+    suggestedPayments: { from: string; to: string; amount: number }[];
+    totals: {
+        expenses: number;
+        assignedShares: number;
+        priorPayments: number;
+        balanceChecksum: number;
+        splitDifference: number;
+    };
 }
 
 interface GroupMemberRow {
@@ -227,6 +265,83 @@ export const SettlementService = {
 
         // Step 4: Run minimization on net balances
         return SettlementService._minimizeNetBalances(net);
+    },
+
+    /**
+     * Builds a read-only audit trail for the explanation/report UI.
+     * It mirrors the existing balance inputs and delegates settlement minimization
+     * to the same helper; it never writes data or changes calculation behavior.
+     */
+    async getCalculationExplanation(groupId: string, categoryFilter = 'All'): Promise<CalculationExplanation> {
+        let expenseQuery = insforge.database
+            .from('expenses')
+            .select('id,item_name,category,created_at,added_by,amount')
+            .eq('group_id', groupId);
+        if (categoryFilter !== 'All') expenseQuery = expenseQuery.eq('category', categoryFilter);
+
+        const settlementRequest = insforge.database
+            .from('settlements')
+            .select('paid_by,paid_to,amount,settled_at,is_partial')
+            .eq('group_id', groupId);
+
+        const [{ data: expenseData, error: expenseError }, { data: settlementData, error: settlementError }] =
+            await Promise.all([expenseQuery, settlementRequest]);
+        if (expenseError) throw new Error(expenseError.message);
+        if (settlementError) throw new Error(settlementError.message);
+
+        const expenses = (expenseData || []) as ExplanationExpenseRow[];
+        const expenseIds = expenses.map((expense) => expense.id);
+        let splits: ExplanationSplitRow[] = [];
+        if (expenseIds.length > 0) {
+            const { data, error } = await insforge.database
+                .from('expense_splits')
+                .select('expense_id,user_id,amount_owed')
+                .in('expense_id', expenseIds);
+            if (error) throw new Error(error.message);
+            splits = (data || []) as ExplanationSplitRow[];
+        }
+
+        const priorPayments = (settlementData || []) as SettlementBalanceRow[];
+        const ledger: Record<string, Omit<MemberCalculationRow, 'userId' | 'netBalance'>> = {};
+        const ensureMember = (userId: string) => {
+            ledger[userId] ??= { paid: 0, assignedShare: 0, paymentsMade: 0, paymentsReceived: 0 };
+            return ledger[userId];
+        };
+
+        for (const expense of expenses) ensureMember(expense.added_by).paid += Number(expense.amount);
+        for (const split of splits) ensureMember(split.user_id).assignedShare += Number(split.amount_owed);
+        for (const payment of priorPayments) {
+            ensureMember(payment.paid_by).paymentsMade += Number(payment.amount);
+            ensureMember(payment.paid_to).paymentsReceived += Number(payment.amount);
+        }
+
+        const net: Record<string, number> = {};
+        const memberRows = Object.entries(ledger).map(([userId, row]) => {
+            const netBalance = row.paid - row.assignedShare + row.paymentsMade - row.paymentsReceived;
+            net[userId] = netBalance;
+            return { userId, ...row, netBalance: Math.round(netBalance * 100) / 100 };
+        });
+
+        const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+        const shareTotal = splits.reduce((sum, split) => sum + Number(split.amount_owed), 0);
+        const paymentTotal = priorPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+        return {
+            generatedAt: new Date().toISOString(),
+            category: categoryFilter,
+            expenses,
+            splits,
+            priorPayments,
+            memberRows,
+            suggestedPayments: SettlementService._minimizeNetBalances({ ...net }),
+            totals: {
+                expenses: Math.round(expenseTotal * 100) / 100,
+                assignedShares: Math.round(shareTotal * 100) / 100,
+                priorPayments: Math.round(paymentTotal * 100) / 100,
+                balanceChecksum: Math.round(Object.values(net).reduce((sum, value) => sum + value, 0) * 100) / 100,
+                splitDifference: Math.round((expenseTotal - shareTotal) * 100) / 100,
+            },
+        };
     },
 
     /**

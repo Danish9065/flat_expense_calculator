@@ -1,8 +1,11 @@
 import { createClient } from '@insforge/sdk';
+import { readPersistentSession, refreshPersistentSession } from './authSession';
 
 const insforge = createClient({
   baseUrl: import.meta.env.VITE_INSFORGE_URL,
   anonKey: import.meta.env.VITE_INSFORGE_ANON_KEY,
+  autoRefreshToken: true,
+  persistSession: true,
 });
 
 export function setAuthToken(token: string | null) {
@@ -46,59 +49,12 @@ async function executeWithRetry<T = unknown>(queryFn: () => Promise<QueryResult<
       isRefreshing = true;
 
       try {
-        const saved = localStorage.getItem('splitmate-user');
-        if (!saved) throw new Error('No saved session found');
-        const authData = JSON.parse(saved);
-        const currentRefreshToken = authData.refreshToken;
-        if (!currentRefreshToken) { throw new Error('No refresh token found in storage'); }
+        const authData = readPersistentSession();
+        if (!authData) throw new Error('No saved session found');
 
-        // Manually refresh token using the custom API endpoint
-        let res;
-        try {
-          const backendUrl = import.meta.env.VITE_INSFORGE_URL;
-          res = await fetch(`${backendUrl}/api/auth/refresh?client_type=mobile`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': import.meta.env.VITE_INSFORGE_ANON_KEY
-            },
-            body: JSON.stringify({ refreshToken: currentRefreshToken })
-          });
-        } catch (networkErr) {
-          console.error('Network offline, session dormant', networkErr);
-          throw new Error('Network offline, session dormant');
-        }
-
-        let resData;
-        try {
-          resData = await res.json();
-        } catch (jsonErr) {
-          console.error('Network offline, session dormant', jsonErr);
-          throw new Error('Network offline, session dormant');
-        }
-
-        if (!res.ok) {
-          if (res.status === 401 || res.status === 400) {
-            // Scenario B: The refresh token itself is truly dead or rejected.
-            // ONLY THEN wipe local storage and force redirect to /login
-            localStorage.removeItem('splitmate-user');
-            window.dispatchEvent(new Event('auth:logout'));
-            window.location.replace('/login');
-            throw new Error('Refresh token dead. Hard logged out.');
-          }
-          // For other server errors (like 500), let it fall through to dormant state
-          console.error('Network offline, session dormant');
-          throw new Error('Network offline, session dormant');
-        }
-
-        if (resData.accessToken && resData.refreshToken) {
-          const newToken = resData.accessToken;
-          setAuthToken(newToken);
-
-          // Update localStorage seamlessly so AuthContext stays in sync
-          authData.token = newToken;
-          authData.refreshToken = resData.refreshToken;
-          localStorage.setItem('splitmate-user', JSON.stringify(authData));
+        const refreshResult = await refreshPersistentSession();
+        if (refreshResult.status === 'refreshed') {
+          setAuthToken(refreshResult.session.token);
 
           isRefreshing = false;
           const currentSubscribers = [...refreshSubscribers];
@@ -107,17 +63,11 @@ async function executeWithRetry<T = unknown>(queryFn: () => Promise<QueryResult<
 
           // Retry the original query
           result = await queryFn();
-        } else {
-          console.error('Network offline, session dormant');
-          throw new Error('Network offline, session dormant');
-        }
+        } else throw new Error(refreshResult.reason);
       } catch (e: unknown) {
         isRefreshing = false;
-        let errorToThrow = e;
-        if (!(e instanceof Error) || e.message !== 'Refresh token dead. Hard logged out.') {
-          console.error('Network offline, session dormant', e);
-          errorToThrow = new Error('Network offline, session dormant');
-        }
+        console.error('Saved session is dormant; it will retry when connectivity returns', e);
+        const errorToThrow = new Error('Your login is saved. Reconnect to refresh this data.');
 
         const currentSubscribers = [...refreshSubscribers];
         refreshSubscribers = [];

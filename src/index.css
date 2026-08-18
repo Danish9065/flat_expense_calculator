@@ -12,6 +12,79 @@
   }
 }
 
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: white !important;
+    color: #17221d !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #calculation-report,
+  #calculation-report * {
+    visibility: visible !important;
+  }
+
+  .calculation-report-overlay {
+    position: static !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+
+  .calculation-report-overlay > div {
+    height: auto !important;
+    max-width: none !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .calculation-report-toolbar {
+    display: none !important;
+  }
+
+  #calculation-report {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .calculation-report {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .calculation-report details,
+  .calculation-report table,
+  .calculation-report tr {
+    break-inside: avoid;
+  }
+
+  .calculation-report table {
+    min-width: 0 !important;
+    font-size: 9px !important;
+  }
+
+  .calculation-report th,
+  .calculation-report td {
+    padding: 6px !important;
+  }
+
+  .calculation-report details:not([open]) > *:not(summary) {
+    display: block !important;
+  }
+}
+
 @layer components {
   .app-section {
     @apply w-full max-w-7xl mx-auto px-4 md:px-16 py-8 md:py-12;
