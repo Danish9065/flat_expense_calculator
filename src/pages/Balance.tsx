@@ -8,6 +8,7 @@ import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, RefreshCw, Fil
 import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+import PaymentActions from '../components/PaymentActions';
 
 const CalculationReport = lazy(() => import('../components/CalculationReport'));
 
@@ -19,6 +20,8 @@ interface GroupMemberRow {
     users?: {
         full_name?: string;
         avatar_url?: string;
+        whatsapp_number?: string | null;
+        upi_id?: string | null;
     };
 }
 
@@ -286,6 +289,9 @@ export default function Balance() {
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
     };
 
+    const getMemberProfile = (id: string) =>
+        (members as GroupMemberRow[]).find((member) => member.user_id === id)?.users;
+
     const closeCalculationReport = useCallback(() => setShowCalculationReport(false), []);
 
     if (loading) {
@@ -487,6 +493,19 @@ export default function Balance() {
                                         {user?.id === s.to ? 'You' : getMemberName(s.to).split(' ')[0]}
                                     </span>
                                 </div>
+
+                                <PaymentActions
+                                    amount={s.amount}
+                                    groupName={groupName}
+                                    debtorName={getMemberName(s.from).split(' ')[0]}
+                                    debtorWhatsApp={getMemberProfile(s.from)?.whatsapp_number}
+                                    creditorName={getMemberName(s.to).split(' ')[0]}
+                                    creditorUpiId={getMemberProfile(s.to)?.upi_id}
+                                    isDebtor={isDebtor}
+                                    isCreditor={isCreditor}
+                                    onInfo={success}
+                                    onError={showError}
+                                />
                             </div>
                         );
                     })}

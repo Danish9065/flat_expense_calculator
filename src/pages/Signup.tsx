@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+import { useState, type FormEvent } from 'react';
 import insforge from '../lib/db';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { User, Mail, Lock, Key, Eye, EyeOff, Loader2, ReceiptText } from 'lucide-react';
+import { User, Mail, Lock, Key, Eye, EyeOff, Loader2, ReceiptText, MessageCircle, WalletCards } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { isValidUpiId, isValidWhatsAppNumber, normalizeUpiId, normalizeWhatsAppNumber } from '../lib/paymentLinks';
 
 export default function Signup() {
     const [searchParams] = useSearchParams();
@@ -13,6 +12,8 @@ export default function Signup() {
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [inviteKey, setInviteKey] = useState(searchParams.get('key') || '');
+    const [whatsappNumber, setWhatsappNumber] = useState('');
+    const [upiId, setUpiId] = useState('');
 
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -43,9 +44,11 @@ export default function Signup() {
         password.length >= 6 &&
         password === confirmPassword &&
         inviteKey.trim().length > 0 &&
+        (!whatsappNumber.trim() || isValidWhatsAppNumber(whatsappNumber)) &&
+        (!upiId.trim() || isValidUpiId(upiId)) &&
         !loading;
 
-    const handleSignup = async (e: React.FormEvent) => {
+    const handleSignup = async (e: FormEvent) => {
         e.preventDefault();
         if (!isFormValid) return;
         setLoading(true);
@@ -66,7 +69,15 @@ export default function Signup() {
 
             success('OTP sent! Please verify your email.');
             // Send email, full name, and invite key to the OTP verification screen
-            navigate('/verify-otp', { state: { email, fullName, inviteKey: keyData.key_code } });
+            navigate('/verify-otp', {
+                state: {
+                    email,
+                    fullName,
+                    inviteKey: keyData.key_code,
+                    whatsappNumber: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
+                    upiId: upiId.trim() ? normalizeUpiId(upiId) : null,
+                }
+            });
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');
         } finally {
@@ -146,6 +157,51 @@ export default function Signup() {
                                     onChange={(e) => setEmail(e.target.value)}
                                     className="auth-field"
                                 />
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                            <p className="text-sm font-bold text-white">Payment & reminder details <span className="font-normal text-muted-foreground">(optional)</span></p>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Shared only with people in your expense groups. You can add or change these later in Me.</p>
+
+                            <div className="mt-4">
+                                <label className="auth-label" htmlFor="signup-whatsapp">WhatsApp number</label>
+                                <div className="mt-2 relative">
+                                    <div className="auth-field-icon"><MessageCircle className="h-5 w-5" /></div>
+                                    <input
+                                        id="signup-whatsapp"
+                                        type="tel"
+                                        inputMode="tel"
+                                        autoComplete="tel"
+                                        value={whatsappNumber}
+                                        placeholder="919876543210"
+                                        onChange={(e) => setWhatsappNumber(e.target.value)}
+                                        className="auth-field"
+                                        aria-describedby="signup-whatsapp-help"
+                                    />
+                                </div>
+                                <p id="signup-whatsapp-help" className={`mt-1 text-xs ${whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber) ? 'text-danger' : 'text-muted-foreground'}`}>
+                                    Include country code, for example 91 for India.
+                                </p>
+                            </div>
+
+                            <div className="mt-4">
+                                <label className="auth-label" htmlFor="signup-upi">UPI ID</label>
+                                <div className="mt-2 relative">
+                                    <div className="auth-field-icon"><WalletCards className="h-5 w-5" /></div>
+                                    <input
+                                        id="signup-upi"
+                                        type="text"
+                                        inputMode="email"
+                                        autoCapitalize="none"
+                                        autoCorrect="off"
+                                        value={upiId}
+                                        placeholder="yourname@bank"
+                                        onChange={(e) => setUpiId(e.target.value)}
+                                        className="auth-field"
+                                    />
+                                </div>
+                                {upiId.trim() && !isValidUpiId(upiId) ? <p className="mt-1 text-xs text-danger">Enter a valid UPI ID such as name@bank.</p> : null}
                             </div>
                         </div>
 

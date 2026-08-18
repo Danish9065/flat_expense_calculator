@@ -1,20 +1,19 @@
 import { createClient } from '@insforge/sdk';
-import { readPersistentSession, refreshPersistentSession } from './authSession';
+import { refreshPersistentSession } from './authSession';
 
 const insforge = createClient({
   baseUrl: import.meta.env.VITE_INSFORGE_URL,
   anonKey: import.meta.env.VITE_INSFORGE_ANON_KEY,
-  autoRefreshToken: true,
-  persistSession: true,
+  retryCount: 2,
 });
 
 export function setAuthToken(token: string | null) {
-  // @ts-expect-error - 'http' might be private in typescript definitions but works at runtime
-  insforge.http.userToken = token;
+  insforge.setAccessToken(token);
 }
 
-let isRefreshing = false;
-let refreshSubscribers: ((error?: Error) => void)[] = [];
+export function setLegacyRefreshToken(token: string | null) {
+  insforge.getHttpClient().setRefreshToken(token);
+}
 
 interface QueryResult<T = unknown> {
   data?: T;
@@ -35,46 +34,15 @@ async function executeWithRetry<T = unknown>(queryFn: () => Promise<QueryResult<
 
   if (result.error) {
     const errStr = JSON.stringify(result.error);
-    // Intercept 401s, JWT expirations, or malformed UUIDs (22P02)
-    if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('401') || errStr.includes('22P02')) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          refreshSubscribers.push((err) => {
-            if (err) return reject(err);
-            resolve(executeWithRetry(queryFn));
-          });
-        });
+    // The stable SDK refreshes automatically. This fallback routes refreshes
+    // through our same-origin auth proxy for browsers that block third-party cookies.
+    if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('AUTH_UNAUTHORIZED') || errStr.includes('401')) {
+      const refreshResult = await refreshPersistentSession();
+      if (refreshResult.status !== 'refreshed') {
+        throw new Error('Your login is saved. Reconnect to refresh this data.');
       }
-
-      isRefreshing = true;
-
-      try {
-        const authData = readPersistentSession();
-        if (!authData) throw new Error('No saved session found');
-
-        const refreshResult = await refreshPersistentSession();
-        if (refreshResult.status === 'refreshed') {
-          setAuthToken(refreshResult.session.token);
-
-          isRefreshing = false;
-          const currentSubscribers = [...refreshSubscribers];
-          refreshSubscribers = [];
-          currentSubscribers.forEach(cb => cb());
-
-          // Retry the original query
-          result = await queryFn();
-        } else throw new Error(refreshResult.reason);
-      } catch (e: unknown) {
-        isRefreshing = false;
-        console.error('Saved session is dormant; it will retry when connectivity returns', e);
-        const errorToThrow = new Error('Your login is saved. Reconnect to refresh this data.');
-
-        const currentSubscribers = [...refreshSubscribers];
-        refreshSubscribers = [];
-        currentSubscribers.forEach(cb => cb(errorToThrow));
-
-        throw errorToThrow;
-      }
+      setAuthToken(refreshResult.accessToken);
+      result = await queryFn();
     }
   }
 
@@ -115,16 +83,17 @@ function parseParams(params: string) {
   return { filters, selectVal, orderCol, orderAsc };
 }
 
-function applyFilters(query: QueryBuilder, filters: { key: string; op: string; val: string }[]) {
+function applyFilters<T extends QueryBuilder>(query: T, filters: { key: string; op: string; val: string }[]): T {
+  let filtered: QueryBuilder = query;
   for (const f of filters) {
-    if (f.op === 'eq') query = query.eq(f.key, f.val);
-    if (f.op === 'neq') query = query.neq(f.key, f.val);
-    if (f.op === 'gt') query = query.gt(f.key, f.val);
-    if (f.op === 'lt') query = query.lt(f.key, f.val);
-    if (f.op === 'like') query = query.like(f.key, f.val);
-    if (f.op === 'in') query = query.in(f.key, f.val.replace(/^\(|\)$/g, '').split(','));
+    if (f.op === 'eq') filtered = filtered.eq(f.key, f.val);
+    if (f.op === 'neq') filtered = filtered.neq(f.key, f.val);
+    if (f.op === 'gt') filtered = filtered.gt(f.key, f.val);
+    if (f.op === 'lt') filtered = filtered.lt(f.key, f.val);
+    if (f.op === 'like') filtered = filtered.like(f.key, f.val);
+    if (f.op === 'in') filtered = filtered.in(f.key, f.val.replace(/^\(|\)$/g, '').split(','));
   }
-  return query;
+  return filtered as T;
 }
 
 export async function dbQuery(table: string, params = '') {
@@ -146,9 +115,9 @@ export async function dbInsert(table: string, body: object) {
 export async function dbUpdate(table: string, params: string, body: object) {
   return executeWithRetry(async () => {
     const { filters, selectVal } = parseParams(params);
-    let query = insforge.database.from(table).update(body).select(selectVal);
+    let query = insforge.database.from(table).update(body);
     query = applyFilters(query, filters);
-    return await query;
+    return await query.select(selectVal);
   });
 }
 

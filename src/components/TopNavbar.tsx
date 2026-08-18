@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { dbQuery } from '../lib/db';
 import { Link, useLocation } from 'react-router-dom';
@@ -43,7 +43,7 @@ export default function TopNavbar() {
         { label: 'Dashboard', path: '/dashboard' },
         { label: 'Balance', path: '/balance' },
         { label: 'Group', path: '/group' },
-        { label: 'Settings', path: '/settings' },
+        { label: 'Me', path: '/settings' },
     ];
 
     if (role === 'admin') {

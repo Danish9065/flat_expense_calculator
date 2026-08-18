@@ -1,9 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import insforge from '../lib/db';
-import { dbUpdate } from '../lib/db';
+import { dbQuery, dbUpdate } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { User, Loader2, Image as ImageIcon, Save, LogOut } from 'lucide-react';
+import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards } from 'lucide-react';
+import { isValidUpiId, isValidWhatsAppNumber, normalizeUpiId, normalizeWhatsAppNumber } from '../lib/paymentLinks';
+
+interface PaymentProfileRow {
+    whatsapp_number?: string | null;
+    upi_id?: string | null;
+}
 
 export default function Settings() {
     const { user, signOut } = useAuth();
@@ -13,6 +19,8 @@ export default function Settings() {
     const [avatarUrl, setAvatarUrl] = useState('');
     const [avatarFile, setAvatarFile] = useState<File | null>(null);
     const [currency, setCurrency] = useState('₹');
+    const [whatsappNumber, setWhatsappNumber] = useState('');
+    const [upiId, setUpiId] = useState('');
     const [profileLoading, setProfileLoading] = useState(false);
 
     // Password updates removed: unsupported by lightweight auth SDK.
@@ -22,12 +30,31 @@ export default function Settings() {
             setFullName(user.full_name || '');
             setAvatarUrl(user.avatar_url || '');
             setCurrency(user.currency || '₹');
+
+            let active = true;
+            void dbQuery('user_payment_profiles', `user_id=eq.${user.id}&select=whatsapp_number,upi_id`)
+                .then((rows) => {
+                    if (!active) return;
+                    const paymentProfile = (rows as unknown as PaymentProfileRow[] | undefined)?.[0];
+                    setWhatsappNumber(paymentProfile?.whatsapp_number || '');
+                    setUpiId(paymentProfile?.upi_id || '');
+                })
+                .catch((error) => console.error('Could not load payment profile', error));
+            return () => { active = false; };
         }
     }, [user]);
 
-    const handleUpdateProfile = async (e: React.FormEvent) => {
+    const handleUpdateProfile = async (e: FormEvent) => {
         e.preventDefault();
         if (!user) return;
+        if (whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber)) {
+            showError('Enter your WhatsApp number with country code, for example 919876543210.');
+            return;
+        }
+        if (upiId.trim() && !isValidUpiId(upiId)) {
+            showError('Enter a valid UPI ID such as yourname@bank.');
+            return;
+        }
         setProfileLoading(true);
 
         try {
@@ -71,6 +98,16 @@ export default function Settings() {
                 currency: currency
             });
 
+            const { error: paymentProfileError } = await insforge.database
+                .from('user_payment_profiles')
+                .upsert({
+                    user_id: user.id,
+                    whatsapp_number: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
+                    upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'user_id' });
+            if (paymentProfileError) throw new Error(paymentProfileError.message || 'Failed to save payment details');
+
             // Optionally update auth user meta data as well
             try {
                 await insforge.auth.setProfile({
@@ -99,7 +136,7 @@ export default function Settings() {
         <div className="app-section pb-28 min-h-screen space-y-6">
             <div className="text-center mb-8">
                 <p className="app-label mb-3">Account preferences</p>
-                <h1 className="app-title">Settings</h1>
+                <h1 className="app-title">Me</h1>
             </div>
 
             {/* Profile Section */}
@@ -160,6 +197,60 @@ export default function Settings() {
                             <option value="€">EUR (€)</option>
                             <option value="£">GBP (£)</option>
                         </select>
+                    </div>
+
+                    <div className="rounded-2xl border border-primary/20 bg-primary/[0.05] p-4 sm:p-5">
+                        <div className="mb-4 flex items-start gap-3">
+                            <div className="rounded-xl bg-primary/10 p-2"><WalletCards className="h-5 w-5 text-primary" /></div>
+                            <div>
+                                <h3 className="font-bold text-white">Payment & reminders</h3>
+                                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Optional details used for UPI payment buttons and WhatsApp reminders.</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="app-label mb-2 block" htmlFor="profile-whatsapp">WhatsApp number</label>
+                                <div className="relative">
+                                    <MessageCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        id="profile-whatsapp"
+                                        type="tel"
+                                        inputMode="tel"
+                                        autoComplete="tel"
+                                        value={whatsappNumber}
+                                        onChange={(e) => setWhatsappNumber(e.target.value)}
+                                        placeholder="919876543210"
+                                        className="dark-input block rounded-lg py-2 pl-10 pr-3 text-sm"
+                                    />
+                                </div>
+                                <p className={`mt-1 text-[11px] ${whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber) ? 'text-danger' : 'text-muted-foreground'}`}>Include the country code without a leading zero.</p>
+                            </div>
+
+                            <div>
+                                <label className="app-label mb-2 block" htmlFor="profile-upi">UPI ID</label>
+                                <div className="relative">
+                                    <WalletCards className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        id="profile-upi"
+                                        type="text"
+                                        inputMode="email"
+                                        autoCapitalize="none"
+                                        autoCorrect="off"
+                                        value={upiId}
+                                        onChange={(e) => setUpiId(e.target.value)}
+                                        placeholder="yourname@bank"
+                                        className="dark-input block rounded-lg py-2 pl-10 pr-3 text-sm"
+                                    />
+                                </div>
+                                {upiId.trim() && !isValidUpiId(upiId) ? <p className="mt-1 text-[11px] text-danger">Enter a valid ID such as name@bank.</p> : null}
+                            </div>
+                        </div>
+
+                        <div className="mt-4 flex items-start gap-2 rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                            <span>These values are visible only to you and people who share an expense group with you. SplitMate never asks for or stores your UPI PIN.</span>
+                        </div>
                     </div>
 
                     <div className="pt-2">

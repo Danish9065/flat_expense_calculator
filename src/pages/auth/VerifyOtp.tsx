@@ -1,6 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
+import { useState, useRef, useEffect, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react';
 import insforge from '../../lib/db';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Mail, Loader2 } from 'lucide-react';
@@ -15,6 +13,8 @@ export default function VerifyOtp() {
     const email = location.state?.email || '';
     const fullName = location.state?.fullName || '';
     const inviteKey = location.state?.inviteKey || '';
+    const whatsappNumber = location.state?.whatsappNumber || null;
+    const upiId = location.state?.upiId || null;
 
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const [loading, setLoading] = useState(false);
@@ -34,13 +34,13 @@ export default function VerifyOtp() {
         if (value && index < 5) inputs.current[index + 1]?.focus();
     };
 
-    const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
+    const handleKeyDown = (index: number, e: KeyboardEvent) => {
         if (e.key === 'Backspace' && !otp[index] && index > 0) {
             inputs.current[index - 1]?.focus();
         }
     };
 
-    const handlePaste = (e: React.ClipboardEvent) => {
+    const handlePaste = (e: ClipboardEvent) => {
         const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
         if (pasted.length === 6) {
             setOtp(pasted.split(''));
@@ -48,7 +48,7 @@ export default function VerifyOtp() {
         }
     };
 
-    const handleVerify = async (e: React.FormEvent) => {
+    const handleVerify = async (e: FormEvent) => {
         e.preventDefault();
         const token = otp.join('');
         if (token.length !== 6) return;
@@ -71,6 +71,13 @@ export default function VerifyOtp() {
                     .upsert({ id: userId, full_name: fullName, email, role: 'member' });
 
                 if (upsertError) console.error("Could not create user profile:", upsertError);
+
+                if (whatsappNumber || upiId) {
+                    const { error: paymentProfileError } = await insforge.database
+                        .from('user_payment_profiles')
+                        .upsert({ user_id: userId, whatsapp_number: whatsappNumber, upi_id: upiId }, { onConflict: 'user_id' });
+                    if (paymentProfileError) console.error('Could not save optional payment details:', paymentProfileError);
+                }
 
                 // Now burn the passed invite key and add them to the group
                 const { error: rpcError } = await insforge.database.rpc('consume_invite_key', {

@@ -39,6 +39,19 @@ const ProtectedRoute = ({ children, adminOnly = false }: { children: React.React
   return <>{children}</>;
 };
 
+const LandingRoute = () => {
+  const { user, role, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[#6C63FF]" />
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} replace />;
+};
+
 function App() {
   return (
     <ErrorBoundary>
@@ -52,7 +65,7 @@ function App() {
                 <main className="flex-grow w-full">
                   <Routes>
                     {/* Public Routes */}
-                    <Route path="/" element={<Navigate to="/login" />} />
+                    <Route path="/" element={<LandingRoute />} />
                     <Route path="/login" element={<div className="-mt-16 md:-mt-20"><Login /></div>} />
                     <Route path="/signup" element={<div className="-mt-16 md:-mt-20"><Signup /></div>} />
                     <Route path="/verify-otp" element={<div className="-mt-16 md:-mt-20"><VerifyOtp /></div>} />

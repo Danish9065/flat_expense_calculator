@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, PieChart, Users, Settings, Shield } from 'lucide-react';
@@ -13,7 +12,7 @@ export default function BottomNav() {
         { label: 'Dashboard', path: '/dashboard', icon: Home },
         { label: 'Balance', path: '/balance', icon: PieChart },
         { label: 'Group', path: '/group', icon: Users },
-        { label: 'Settings', path: '/settings', icon: Settings },
+        { label: 'Me', path: '/settings', icon: Settings },
     ];
 
     if (role === 'admin') {

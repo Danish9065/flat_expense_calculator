@@ -2,8 +2,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { dbQuery } from '../lib/db';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
 import { useAuth } from './AuthContext';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -18,6 +16,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   const [members, setMembers] = useState<any[]>([]);
 
   const fetchGroup = async () => {
+    if (!user) return;
     try {
       // Step 1: get ALL group_ids for this user
       const memberships = await dbQuery('group_members', `user_id=eq.${user.id}&select=group_id`);
@@ -68,18 +67,26 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const userIds = memberRows.map((m: any) => m.user_id);
-      const userDetails = await Promise.all(
-        userIds.map((uid: string) =>
-          dbQuery('users', `id=eq.${uid}&select=id,full_name,email,role,avatar_url`)
-            .then(rows => rows?.[0])
-            .catch(() => null)
-        )
-      );
+      const [userDetails, paymentProfiles] = await Promise.all([
+        dbQuery('users', `id=in.(${userIds.join(',')})&select=id,full_name,email,role,avatar_url`),
+        dbQuery('user_payment_profiles', `user_id=in.(${userIds.join(',')})&select=user_id,whatsapp_number,upi_id`)
+          .catch((error) => {
+            console.error('Payment profiles are unavailable; run the payment profile migration', error);
+            return [];
+          }),
+      ]);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const combined = memberRows.map((m: any, i: number) => ({
+      const usersById = new Map((userDetails || []).map((profile: any) => [profile.id, profile]));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const paymentsById = new Map((paymentProfiles || []).map((profile: any) => [profile.user_id, profile]));
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const combined = memberRows.map((m: any) => ({
         user_id: m.user_id,
-        users: userDetails[i] ?? null
+        users: usersById.has(m.user_id)
+          ? { ...usersById.get(m.user_id), ...paymentsById.get(m.user_id) }
+          : null
       }));
 
       setMembers(combined);
