@@ -41,7 +41,7 @@ export default function TopNavbar() {
 
     const navItems = [
         { label: 'Dashboard', path: '/dashboard' },
-        { label: 'Balance', path: '/balance' },
+        { label: 'Payments', path: '/balance' },
         { label: 'Group', path: '/group' },
         { label: 'Me', path: '/settings' },
     ];

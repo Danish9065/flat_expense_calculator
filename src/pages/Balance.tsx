@@ -43,7 +43,7 @@ interface SettlementRow {
     amount: number;
 }
 
-export default function Balance() {
+export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const { user } = useAuth();
     const { groupId, groupName, members } = useGroup();
     const { success, error: showError } = useToast();
@@ -82,7 +82,7 @@ export default function Balance() {
             const catTotals: Record<string, number> = {};
 
             if (expenses) {
-                (expenses as ExpenseChartRow[]).forEach((e) => {
+                (expenses as unknown as ExpenseChartRow[]).forEach((e) => {
                     userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
                     catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
                 });
@@ -306,7 +306,7 @@ export default function Balance() {
     );
 
     return (
-        <div className="app-section pb-28 min-h-screen">
+        <div className={embedded ? 'pb-12' : 'app-section pb-28 min-h-screen'}>
             <div className="mb-8 flex flex-col items-center justify-between gap-5 text-center sm:flex-row sm:text-left">
                 <div>
                     <p className="app-label mb-3">Group settlement calculator</p>

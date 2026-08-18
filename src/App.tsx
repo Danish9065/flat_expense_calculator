@@ -9,7 +9,7 @@ import VerifyPasswordOTP from './pages/auth/VerifyPasswordOTP';
 import ResetPassword from './pages/auth/ResetPassword';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
-import Balance from './pages/Balance';
+import PaymentCenter from './pages/PaymentCenter';
 import Group from './pages/Group';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
@@ -75,7 +75,7 @@ function App() {
 
                     {/* Protected Routes */}
                     <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                    <Route path="/balance" element={<ProtectedRoute><Balance /></ProtectedRoute>} />
+                    <Route path="/balance" element={<ProtectedRoute><PaymentCenter /></ProtectedRoute>} />
                     <Route path="/group" element={<ProtectedRoute><Group /></ProtectedRoute>} />
                     <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 

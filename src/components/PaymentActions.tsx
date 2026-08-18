@@ -16,6 +16,8 @@ interface PaymentActionsProps {
   creditorUpiId?: string | null;
   isDebtor: boolean;
   isCreditor: boolean;
+  payLabel?: string;
+  reminderLabel?: string;
   onInfo: (message: string) => void;
   onError: (message: string) => void;
 }
@@ -31,6 +33,8 @@ export default function PaymentActions({
   creditorUpiId,
   isDebtor,
   isCreditor,
+  payLabel = 'Pay via any UPI app',
+  reminderLabel = 'Remind on WhatsApp',
   onInfo,
   onError,
 }: PaymentActionsProps) {
@@ -86,7 +90,7 @@ export default function PaymentActions({
             aria-label={`Remind ${debtorName} on WhatsApp`}
           >
             <MessageCircle className="h-4 w-4" />
-            Remind on WhatsApp
+            {reminderLabel}
             <ExternalLink className="h-3.5 w-3.5 opacity-70" />
           </button>
         ) : null}
@@ -99,7 +103,7 @@ export default function PaymentActions({
             aria-label={`Pay ${creditorName} via UPI`}
           >
             {isMobileDevice() ? <Smartphone className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            {isMobileDevice() ? 'Pay via any UPI app' : 'Copy UPI ID'}
+            {isMobileDevice() ? payLabel : 'Copy UPI ID'}
           </button>
         ) : null}
       </div>

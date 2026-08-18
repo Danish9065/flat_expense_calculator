@@ -63,7 +63,35 @@ interface GroupMemberRow {
     };
 }
 
+interface BatchSettlementAllocation {
+    groupId: string;
+    debtorId: string;
+    creditorId: string;
+    amount: number;
+}
+
 export const SettlementService = {
+    /**
+     * Records a creditor-confirmed combined payment atomically across groups.
+     * The database function derives the creditor from auth.uid() and validates
+     * that both parties belong to every source group.
+     */
+    async settleMultiple(allocations: BatchSettlementAllocation[]) {
+        if (allocations.length === 0) throw new Error('No payment allocations were provided');
+        const creditorIds = new Set(allocations.map((allocation) => allocation.creditorId));
+        if (creditorIds.size !== 1) throw new Error('A combined confirmation must have one receiver');
+
+        const { data, error } = await insforge.database.rpc('record_group_settlements_batch', {
+            p_payments: allocations.map((allocation) => ({
+                group_id: allocation.groupId,
+                debtor_id: allocation.debtorId,
+                amount: Math.round(allocation.amount * 100) / 100,
+            })),
+        });
+        if (error) throw new Error(error.message || 'Failed to record combined payment');
+        return data;
+    },
+
     /**
      * Calculate the net balance for a single user in a group.
      */

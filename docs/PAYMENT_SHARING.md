@@ -8,6 +8,8 @@
 - A person who owes money can open the creditor's UPI payment request with payee, amount, note, and INR prefilled.
 - On desktop, where a UPI app usually cannot handle the intent, the creditor's UPI ID is copied instead.
 - Opening a UPI app does not create a settlement. The existing creditor confirmation flow remains responsible for recording receipt.
+- The Payment Center combines amounts owed to the same person across every group and keeps an expandable group-by-group allocation.
+- A creditor can confirm a combined receipt once; the database records its source-group settlements atomically.
 
 ## Privacy model
 
@@ -16,8 +18,9 @@ Payment identifiers live in `user_payment_profiles`, not the general `users` row
 ## Deployment order
 
 1. Apply [`migrations/20260819_add_payment_profiles.sql`](../migrations/20260819_add_payment_profiles.sql) to the InsForge/Postgres database.
-2. Deploy the frontend branch.
-3. Test with two accounts in the same group: add a UPI ID to the creditor, add a WhatsApp number to the debtor, and verify both actions from the Balances page.
+2. Apply [`migrations/20260819_add_bulk_settlement_rpc.sql`](../migrations/20260819_add_bulk_settlement_rpc.sql).
+3. Deploy the frontend branch.
+4. Test with two accounts across at least two groups: add a UPI ID to the creditor, add a WhatsApp number to the debtor, and verify combined payment and confirmation from Payment Center.
 
 The frontend gracefully keeps ordinary group and balance screens working if the migration has not yet been applied, but payment-profile saving will remain unavailable until it is installed.
 

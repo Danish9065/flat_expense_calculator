@@ -10,7 +10,7 @@ export default function BottomNav() {
 
     const navItems = [
         { label: 'Dashboard', path: '/dashboard', icon: Home },
-        { label: 'Balance', path: '/balance', icon: PieChart },
+        { label: 'Payments', path: '/balance', icon: PieChart },
         { label: 'Group', path: '/group', icon: Users },
         { label: 'Me', path: '/settings', icon: Settings },
     ];

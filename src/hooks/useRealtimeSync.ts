@@ -36,7 +36,7 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
         if (result.ok) {
           subscribed = true;
           insforge.realtime.on('data-changed', handleEvent);
-        } else {
+        } else if ('error' in result) {
           console.warn('[Realtime] Failed to subscribe:', result.error?.message);
         }
       } catch (err) {
