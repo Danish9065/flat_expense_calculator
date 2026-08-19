@@ -15,7 +15,7 @@ interface ExpenseModalProps {
     groupId: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     editingExpense?: any;
-    onSuccess?: () => void;
+    onSuccess?: () => void | Promise<void>;
 }
 
 
@@ -127,10 +127,11 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                 success('Expense added');
             }
 
+            // Keep the saving state visible until the dashboard has fetched the
+            // committed expense and all of its splits. This makes a successful
+            // save deterministic even if Realtime is reconnecting.
+            await onSuccess?.();
             onClose();
-            if (onSuccess) {
-                onSuccess();
-            }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Failed to save expense');
