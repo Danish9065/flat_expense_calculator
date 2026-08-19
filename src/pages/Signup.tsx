@@ -3,7 +3,9 @@ import insforge from '../lib/db';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { User, Mail, Lock, Key, Eye, EyeOff, Loader2, ReceiptText, MessageCircle, WalletCards } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { isValidUpiId, isValidWhatsAppNumber, normalizeUpiId, normalizeWhatsAppNumber } from '../lib/paymentLinks';
+import { isValidUpiId, normalizeUpiId } from '../lib/paymentLinks';
+import CountryCodeSelect from '../components/CountryCodeSelect';
+import { buildInternationalWhatsAppNumber, sanitizeLocalPhoneNumber } from '../lib/countryPhone';
 
 export default function Signup() {
     const [searchParams] = useSearchParams();
@@ -12,6 +14,7 @@ export default function Signup() {
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [inviteKey, setInviteKey] = useState(searchParams.get('key') || '');
+    const [countryIso, setCountryIso] = useState('IN');
     const [whatsappNumber, setWhatsappNumber] = useState('');
     const [upiId, setUpiId] = useState('');
 
@@ -36,6 +39,9 @@ export default function Signup() {
     };
 
     const strength = getPasswordStrength(password);
+    const normalizedWhatsAppNumber = whatsappNumber.trim()
+        ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
+        : null;
 
     // Live validation
     const isFormValid =
@@ -44,7 +50,7 @@ export default function Signup() {
         password.length >= 6 &&
         password === confirmPassword &&
         inviteKey.trim().length > 0 &&
-        (!whatsappNumber.trim() || isValidWhatsAppNumber(whatsappNumber)) &&
+        (!whatsappNumber.trim() || normalizedWhatsAppNumber !== null) &&
         (!upiId.trim() || isValidUpiId(upiId)) &&
         !loading;
 
@@ -68,7 +74,7 @@ export default function Signup() {
                     data: {
                         full_name: fullName.trim(),
                         invite_key: normalizedInviteKey,
-                        whatsapp_number: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
+                        whatsapp_number: normalizedWhatsAppNumber,
                         upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
                     },
                 },
@@ -168,22 +174,25 @@ export default function Signup() {
 
                             <div className="mt-4">
                                 <label className="auth-label" htmlFor="signup-whatsapp">WhatsApp number</label>
-                                <div className="mt-2 relative">
-                                    <div className="auth-field-icon"><MessageCircle className="h-5 w-5" /></div>
-                                    <input
-                                        id="signup-whatsapp"
-                                        type="tel"
-                                        inputMode="tel"
-                                        autoComplete="tel"
-                                        value={whatsappNumber}
-                                        placeholder="919876543210"
-                                        onChange={(e) => setWhatsappNumber(e.target.value)}
-                                        className="auth-field"
-                                        aria-describedby="signup-whatsapp-help"
-                                    />
+                                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+                                    <CountryCodeSelect id="signup-country-code" value={countryIso} onChange={setCountryIso} className="dark-input min-h-12 rounded-xl px-3 text-sm" />
+                                    <div className="relative">
+                                        <div className="auth-field-icon"><MessageCircle className="h-5 w-5" /></div>
+                                        <input
+                                            id="signup-whatsapp"
+                                            type="tel"
+                                            inputMode="numeric"
+                                            autoComplete="tel-national"
+                                            value={whatsappNumber}
+                                            placeholder="9065440786"
+                                            onChange={(e) => setWhatsappNumber(sanitizeLocalPhoneNumber(e.target.value))}
+                                            className="auth-field"
+                                            aria-describedby="signup-whatsapp-help"
+                                        />
+                                    </div>
                                 </div>
-                                <p id="signup-whatsapp-help" className={`mt-1 text-xs ${whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber) ? 'text-danger' : 'text-muted-foreground'}`}>
-                                    Include country code, for example 91 for India.
+                                <p id="signup-whatsapp-help" className={`mt-1 text-xs ${whatsappNumber.trim() && !normalizedWhatsAppNumber ? 'text-danger' : 'text-muted-foreground'}`}>
+                                    India (+91) is selected by default. Enter the number without a leading zero.
                                 </p>
                             </div>
 

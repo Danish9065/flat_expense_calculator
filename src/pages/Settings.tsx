@@ -3,9 +3,16 @@ import insforge from '../lib/db';
 import { dbQuery, dbUpdate } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards } from 'lucide-react';
-import { isValidUpiId, isValidWhatsAppNumber, normalizeUpiId, normalizeWhatsAppNumber } from '../lib/paymentLinks';
+import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards, Pencil, CheckCircle2, X } from 'lucide-react';
+import { isValidUpiId, normalizeUpiId } from '../lib/paymentLinks';
 import { deleteStorageReference, safeStorageFileName, uploadPrivateFile } from '../lib/storage';
+import CountryCodeSelect from '../components/CountryCodeSelect';
+import {
+    buildInternationalWhatsAppNumber,
+    formatInternationalPhone,
+    sanitizeLocalPhoneNumber,
+    splitInternationalWhatsAppNumber,
+} from '../lib/countryPhone';
 
 interface PaymentProfileRow {
     whatsapp_number?: string | null;
@@ -20,9 +27,13 @@ export default function Settings() {
     const [avatarUrl, setAvatarUrl] = useState('');
     const [avatarFile, setAvatarFile] = useState<File | null>(null);
     const [currency, setCurrency] = useState('₹');
+    const [countryIso, setCountryIso] = useState('IN');
     const [whatsappNumber, setWhatsappNumber] = useState('');
     const [upiId, setUpiId] = useState('');
     const [profileLoading, setProfileLoading] = useState(false);
+    const [paymentProfileLoading, setPaymentProfileLoading] = useState(true);
+    const [savedPaymentProfile, setSavedPaymentProfile] = useState<PaymentProfileRow | null>(null);
+    const [paymentDetailsEditing, setPaymentDetailsEditing] = useState(true);
 
     // Password updates removed: unsupported by lightweight auth SDK.
 
@@ -33,23 +44,37 @@ export default function Settings() {
             setCurrency(user.currency || '₹');
 
             let active = true;
+            setPaymentProfileLoading(true);
             void dbQuery('user_payment_profiles', `user_id=eq.${user.id}&select=whatsapp_number,upi_id`)
                 .then((rows) => {
                     if (!active) return;
                     const paymentProfile = (rows as unknown as PaymentProfileRow[] | undefined)?.[0];
-                    setWhatsappNumber(paymentProfile?.whatsapp_number || '');
+                    const parsedPhone = splitInternationalWhatsAppNumber(paymentProfile?.whatsapp_number);
+                    setCountryIso(parsedPhone.countryIso);
+                    setWhatsappNumber(parsedPhone.localNumber);
                     setUpiId(paymentProfile?.upi_id || '');
+                    setSavedPaymentProfile(paymentProfile || null);
+                    setPaymentDetailsEditing(!paymentProfile);
                 })
-                .catch((error) => console.error('Could not load payment profile', error));
+                .catch((error) => {
+                    console.error('Could not load payment profile', error);
+                    if (active) showError('Could not load your saved payment details. Please try again.');
+                })
+                .finally(() => { if (active) setPaymentProfileLoading(false); });
             return () => { active = false; };
         }
-    }, [user]);
+    }, [showError, user]);
 
     const handleUpdateProfile = async (e: FormEvent) => {
         e.preventDefault();
         if (!user) return;
-        if (whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber)) {
-            showError('Enter your WhatsApp number with country code, for example 919876543210.');
+        const normalizedWhatsAppNumber = whatsappNumber.trim()
+            ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
+            : null;
+        if (whatsappNumber.trim() && !normalizedWhatsAppNumber) {
+            showError(countryIso === 'IN'
+                ? 'Enter a valid 10-digit Indian mobile number beginning with 6, 7, 8, or 9.'
+                : 'Enter a valid mobile number without a leading zero.');
             return;
         }
         if (upiId.trim() && !isValidUpiId(upiId)) {
@@ -75,15 +100,25 @@ export default function Settings() {
                 currency: currency
             });
 
-            const { error: paymentProfileError } = await insforge.database
+            const { data: savedProfile, error: paymentProfileError } = await insforge.database
                 .from('user_payment_profiles')
                 .upsert({
                     user_id: user.id,
-                    whatsapp_number: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
+                    whatsapp_number: normalizedWhatsAppNumber,
                     upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
                     updated_at: new Date().toISOString(),
-                }, { onConflict: 'user_id' });
+                }, { onConflict: 'user_id' })
+                .select('whatsapp_number,upi_id')
+                .single();
             if (paymentProfileError) throw new Error(paymentProfileError.message || 'Failed to save payment details');
+
+            const persistedProfile = savedProfile as PaymentProfileRow;
+            const parsedPhone = splitInternationalWhatsAppNumber(persistedProfile.whatsapp_number);
+            setCountryIso(parsedPhone.countryIso);
+            setWhatsappNumber(parsedPhone.localNumber);
+            setUpiId(persistedProfile.upi_id || '');
+            setSavedPaymentProfile(persistedProfile);
+            setPaymentDetailsEditing(false);
 
             // Optionally update auth user meta data as well
             try {
@@ -95,15 +130,20 @@ export default function Settings() {
             }
 
             success('Profile updated successfully!');
-
-            // Auto reload to refresh auth context user details
-            setTimeout(() => window.location.reload(), 1000);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             showError(err.message || 'Error updating profile');
         } finally {
             setProfileLoading(false);
         }
+    };
+
+    const cancelPaymentDetailsEdit = () => {
+        const parsedPhone = splitInternationalWhatsAppNumber(savedPaymentProfile?.whatsapp_number);
+        setCountryIso(parsedPhone.countryIso);
+        setWhatsappNumber(parsedPhone.localNumber);
+        setUpiId(savedPaymentProfile?.upi_id || '');
+        setPaymentDetailsEditing(false);
     };
 
 
@@ -184,44 +224,64 @@ export default function Settings() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="app-label mb-2 block" htmlFor="profile-whatsapp">WhatsApp number</label>
-                                <div className="relative">
-                                    <MessageCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                    <input
-                                        id="profile-whatsapp"
-                                        type="tel"
-                                        inputMode="tel"
-                                        autoComplete="tel"
-                                        value={whatsappNumber}
-                                        onChange={(e) => setWhatsappNumber(e.target.value)}
-                                        placeholder="919876543210"
-                                        className="dark-input block rounded-lg py-2 pl-10 pr-3 text-sm"
-                                    />
+                        {paymentProfileLoading ? (
+                            <div className="grid min-h-28 place-items-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                        ) : savedPaymentProfile && !paymentDetailsEditing ? (
+                            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <span className="inline-flex items-center gap-2 text-sm font-bold text-emerald-200"><CheckCircle2 className="h-4 w-4" /> Saved payment details</span>
+                                    <button type="button" onClick={() => setPaymentDetailsEditing(true)} className="ghost-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-xs font-bold"><Pencil className="h-4 w-4" /> Edit WhatsApp & UPI</button>
                                 </div>
-                                <p className={`mt-1 text-[11px] ${whatsappNumber.trim() && !isValidWhatsAppNumber(whatsappNumber) ? 'text-danger' : 'text-muted-foreground'}`}>Include the country code without a leading zero.</p>
+                                <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                    <div className="rounded-xl bg-black/20 p-3"><dt className="app-label flex items-center gap-2"><MessageCircle className="h-4 w-4 text-emerald-300" /> WhatsApp</dt><dd className="mt-2 break-all font-semibold text-white">{formatInternationalPhone(savedPaymentProfile.whatsapp_number)}</dd></div>
+                                    <div className="rounded-xl bg-black/20 p-3"><dt className="app-label flex items-center gap-2"><WalletCards className="h-4 w-4 text-emerald-300" /> UPI ID</dt><dd className="mt-2 break-all font-semibold text-white">{savedPaymentProfile.upi_id || 'Not added'}</dd></div>
+                                </dl>
                             </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="app-label mb-2 block" htmlFor="profile-whatsapp">WhatsApp number</label>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+                                        <CountryCodeSelect id="profile-country-code" value={countryIso} onChange={setCountryIso} className="dark-input min-h-11 rounded-lg px-3 text-sm" />
+                                        <div className="relative">
+                                            <MessageCircle className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <input
+                                                id="profile-whatsapp"
+                                                type="tel"
+                                                inputMode="numeric"
+                                                autoComplete="tel-national"
+                                                value={whatsappNumber}
+                                                onChange={(e) => setWhatsappNumber(sanitizeLocalPhoneNumber(e.target.value))}
+                                                placeholder="9065440786"
+                                                className="dark-input min-h-11 rounded-lg py-2 pl-10 pr-3 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-muted-foreground">India (+91) is selected by default. Enter the mobile number without a leading zero.</p>
+                                </div>
 
-                            <div>
-                                <label className="app-label mb-2 block" htmlFor="profile-upi">UPI ID</label>
-                                <div className="relative">
-                                    <WalletCards className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                    <input
-                                        id="profile-upi"
-                                        type="text"
-                                        inputMode="email"
-                                        autoCapitalize="none"
-                                        autoCorrect="off"
-                                        value={upiId}
-                                        onChange={(e) => setUpiId(e.target.value)}
-                                        placeholder="yourname@bank"
-                                        className="dark-input block rounded-lg py-2 pl-10 pr-3 text-sm"
-                                    />
+                                <div>
+                                    <label className="app-label mb-2 block" htmlFor="profile-upi">UPI ID</label>
+                                    <div className="relative">
+                                        <WalletCards className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                        <input
+                                            id="profile-upi"
+                                            type="text"
+                                            inputMode="email"
+                                            autoCapitalize="none"
+                                            autoCorrect="off"
+                                            value={upiId}
+                                            onChange={(e) => setUpiId(e.target.value)}
+                                            placeholder="yourname@bank"
+                                            className="dark-input min-h-11 rounded-lg py-2 pl-10 pr-3 text-sm"
+                                        />
+                                    </div>
+                                    {upiId.trim() && !isValidUpiId(upiId) ? <p className="mt-1 text-[11px] text-danger">Enter a valid ID such as name@bank.</p> : null}
                                 </div>
-                                {upiId.trim() && !isValidUpiId(upiId) ? <p className="mt-1 text-[11px] text-danger">Enter a valid ID such as name@bank.</p> : null}
+
+                                {savedPaymentProfile ? <button type="button" onClick={cancelPaymentDetailsEdit} className="ghost-button inline-flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-bold"><X className="h-4 w-4" /> Cancel editing</button> : null}
                             </div>
-                        </div>
+                        )}
 
                         <div className="mt-4 flex items-start gap-2 rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-muted-foreground">
                             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
