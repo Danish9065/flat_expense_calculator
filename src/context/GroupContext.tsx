@@ -114,6 +114,14 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     fetchGroup();
   }, [user, authLoading]);
 
+  useEffect(() => {
+    const refreshPaymentProfiles = () => {
+      if (activeGroupId) void fetchMembers(activeGroupId);
+    };
+    window.addEventListener('splitmate:payment-profile-changed', refreshPaymentProfiles);
+    return () => window.removeEventListener('splitmate:payment-profile-changed', refreshPaymentProfiles);
+  }, [activeGroupId]);
+
   // Derived state for the currently active group for backwards compatibility
   const currentGroup = groups.find(g => g.id === activeGroupId) || null;
   const groupId = currentGroup?.id || null;

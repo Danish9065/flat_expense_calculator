@@ -9,23 +9,26 @@ interface GroupChangeDetail {
   groupId: string;
 }
 
-/** Re-fetches group data after database changes or an explicit group broadcast. */
-export function useRealtimeSync(groupId: string | null, onDataChanged: () => void | Promise<void>) {
+function useRealtimeGroupCollection(
+  groupIds: string[],
+  onDataChanged: () => void | Promise<void>,
+  allGroups: boolean,
+) {
   const onDataChangedRef = useRef(onDataChanged);
+  const groupKey = Array.from(new Set(groupIds.filter(Boolean))).sort().join(',');
 
   useEffect(() => {
     onDataChangedRef.current = onDataChanged;
   }, [onDataChanged]);
 
   useEffect(() => {
-    if (!groupId) return;
+    const normalizedGroupIds = groupKey ? groupKey.split(',') : [];
+    if (normalizedGroupIds.length === 0) return;
 
     let refreshTimer: number | null = null;
     let cancelled = false;
-    let channel: ReturnType<typeof supabaseClient.channel> | null = null;
+    const channels: Array<ReturnType<typeof supabaseClient.channel>> = [];
 
-    // One expense creates several split rows. Debouncing prevents a burst of
-    // identical dashboard requests while still updating promptly.
     const handleEvent = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
@@ -36,7 +39,7 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
 
     const handleLocalEvent = (event: Event) => {
       const detail = (event as CustomEvent<GroupChangeDetail>).detail;
-      if (detail?.groupId === groupId) handleEvent();
+      if (detail?.groupId && normalizedGroupIds.includes(detail.groupId)) handleEvent();
     };
 
     const refreshWhenActive = () => {
@@ -50,44 +53,63 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
         return;
       }
       if (cancelled || !data.session?.access_token) return;
-
-      // Realtime maintains its own socket authorization state. Explicitly give
-      // it the restored/refreshed access token before opening a protected
-      // channel so it cannot enter an unauthorized reconnect loop.
       await supabaseClient.realtime.setAuth(data.session.access_token);
       if (cancelled) return;
 
-      const filter = `group_id=eq.${groupId}`;
-      channel = supabaseClient
-        .channel(`group-data:${groupId}`)
-        .on('broadcast', { event: 'data-changed' }, handleEvent)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter }, handleEvent)
-        // expense_splits has no group_id column, so it cannot use the group
-        // filter. RLS still limits delivered rows to authorized group data.
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_splits' }, handleEvent)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter }, handleEvent)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter }, handleEvent)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter }, handleEvent)
-        .subscribe((status, error) => {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.warn(`[Realtime] Group channel ${status.toLowerCase()}`, error);
-          }
-        });
+      if (allGroups) {
+        // RLS limits these unfiltered events to rows the signed-in user may
+        // access. A single database channel keeps every group summary current.
+        const databaseChannel = supabaseClient
+          .channel(`all-group-data:${normalizedGroupIds.length}:${normalizedGroupIds[0]}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_splits' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_payment_profiles' }, handleEvent)
+          .subscribe((status, channelError) => {
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.warn(`[Realtime] All-groups channel ${status.toLowerCase()}`, channelError);
+            }
+          });
+        channels.push(databaseChannel);
+
+        for (const groupId of normalizedGroupIds) {
+          const broadcastChannel = supabaseClient
+            .channel(`group-data:${groupId}`)
+            .on('broadcast', { event: 'data-changed' }, handleEvent)
+            .subscribe();
+          channels.push(broadcastChannel);
+        }
+      } else {
+        const groupId = normalizedGroupIds[0];
+        const filter = `group_id=eq.${groupId}`;
+        const groupChannel = supabaseClient
+          .channel(`group-data:${groupId}`)
+          .on('broadcast', { event: 'data-changed' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_splits' }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter }, handleEvent)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter }, handleEvent)
+          .subscribe((status, channelError) => {
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.warn(`[Realtime] Group channel ${status.toLowerCase()}`, channelError);
+            }
+          });
+        channels.push(groupChannel);
+      }
     };
 
     void connect();
-
     const { data: authListener } = supabaseClient.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) void supabaseClient.realtime.setAuth(session.access_token);
     });
-
-    // Realtime is the primary path. These lightweight recovery paths ensure a
-    // sleeping mobile tab or temporary socket failure never leaves stale data.
     const fallbackTimer = window.setInterval(refreshWhenActive, FALLBACK_SYNC_INTERVAL_MS);
     window.addEventListener(LOCAL_GROUP_CHANGE_EVENT, handleLocalEvent);
     window.addEventListener('focus', refreshWhenActive);
     window.addEventListener('online', refreshWhenActive);
     document.addEventListener('visibilitychange', refreshWhenActive);
+
     return () => {
       cancelled = true;
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
@@ -97,9 +119,19 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
       window.removeEventListener('focus', refreshWhenActive);
       window.removeEventListener('online', refreshWhenActive);
       document.removeEventListener('visibilitychange', refreshWhenActive);
-      if (channel) void supabaseClient.removeChannel(channel);
+      for (const channel of channels) void supabaseClient.removeChannel(channel);
     };
-  }, [groupId]);
+  }, [allGroups, groupKey]);
+}
+
+/** Re-fetches group data after database changes or an explicit group broadcast. */
+export function useRealtimeSync(groupId: string | null, onDataChanged: () => void | Promise<void>) {
+  useRealtimeGroupCollection(groupId ? [groupId] : [], onDataChanged, false);
+}
+
+/** Keeps the combined payment view synchronized with every accessible group. */
+export function useAllGroupsRealtimeSync(groupIds: string[], onDataChanged: () => void | Promise<void>) {
+  useRealtimeGroupCollection(groupIds, onDataChanged, true);
 }
 
 export async function notifyGroupDataChanged(groupId: string) {

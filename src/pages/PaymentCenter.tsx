@@ -7,7 +7,7 @@ import { dbQuery } from '../lib/db';
 import { aggregateUserPayments, type ConsolidatedPayment, type GroupSettlementSource } from '../lib/paymentAggregation';
 import { SettlementService } from '../services/settlementService';
 import PaymentActions from '../components/PaymentActions';
-import { notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+import { notifyGroupDataChanged, useAllGroupsRealtimeSync } from '../hooks/useRealtimeSync';
 
 const Balance = lazy(() => import('./Balance'));
 
@@ -81,6 +81,11 @@ export default function PaymentCenter() {
   useEffect(() => {
     if (view === 'all') void loadAllPayments();
   }, [loadAllPayments, view]);
+
+  useAllGroupsRealtimeSync(
+    view === 'all' ? groupList.map((group) => group.id) : [],
+    () => loadAllPayments(true),
+  );
 
   useEffect(() => {
     const refresh = () => void loadAllPayments(true);

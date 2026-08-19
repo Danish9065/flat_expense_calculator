@@ -34,6 +34,7 @@ export default function Settings() {
     const [whatsappNumber, setWhatsappNumber] = useState('');
     const [upiId, setUpiId] = useState('');
     const [profileLoading, setProfileLoading] = useState(false);
+    const [paymentProfileSaving, setPaymentProfileSaving] = useState(false);
     const [paymentProfileLoading, setPaymentProfileLoading] = useState(true);
     const [savedPaymentProfile, setSavedPaymentProfile] = useState<PaymentProfileRow | null>(null);
     const [paymentDetailsEditing, setPaymentDetailsEditing] = useState(true);
@@ -67,7 +68,7 @@ export default function Settings() {
                     setWhatsappNumber(parsedPhone.localNumber);
                     setUpiId(paymentProfile?.upi_id || '');
                     setSavedPaymentProfile(paymentProfile || null);
-                    setPaymentDetailsEditing(!paymentProfile);
+                    setPaymentDetailsEditing(!paymentProfile?.whatsapp_number && !paymentProfile?.upi_id);
                 })
                 .catch((error) => {
                     console.error('Could not load payment profile', error);
@@ -81,19 +82,6 @@ export default function Settings() {
     const handleUpdateProfile = async (e: FormEvent) => {
         e.preventDefault();
         if (!user) return;
-        const normalizedWhatsAppNumber = whatsappNumber.trim()
-            ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
-            : null;
-        if (whatsappNumber.trim() && !normalizedWhatsAppNumber) {
-            showError(countryIso === 'IN'
-                ? 'Enter a valid 10-digit Indian mobile number beginning with 6, 7, 8, or 9.'
-                : 'Enter a valid mobile number without a leading zero.');
-            return;
-        }
-        if (upiId.trim() && !isValidUpiId(upiId)) {
-            showError('Enter a valid UPI ID such as yourname@bank.');
-            return;
-        }
         setProfileLoading(true);
 
         let uploadedAvatarReference: string | null = null;
@@ -127,26 +115,6 @@ export default function Settings() {
                 });
             }
 
-            const { data: savedProfile, error: paymentProfileError } = await insforge.database
-                .from('user_payment_profiles')
-                .upsert({
-                    user_id: user.id,
-                    whatsapp_number: normalizedWhatsAppNumber,
-                    upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
-                    updated_at: new Date().toISOString(),
-                }, { onConflict: 'user_id' })
-                .select('whatsapp_number,upi_id')
-                .single();
-            if (paymentProfileError) throw new Error(paymentProfileError.message || 'Failed to save payment details');
-
-            const persistedProfile = savedProfile as PaymentProfileRow;
-            const parsedPhone = splitInternationalWhatsAppNumber(persistedProfile.whatsapp_number);
-            setCountryIso(parsedPhone.countryIso);
-            setWhatsappNumber(parsedPhone.localNumber);
-            setUpiId(persistedProfile.upi_id || '');
-            setSavedPaymentProfile(persistedProfile);
-            setPaymentDetailsEditing(false);
-
             // Optionally update auth user meta data as well
             try {
                 await insforge.auth.updateUser({
@@ -167,6 +135,58 @@ export default function Settings() {
             showError(err.message || 'Error updating profile');
         } finally {
             setProfileLoading(false);
+        }
+    };
+
+    const savePaymentDetails = async () => {
+        if (!user) return;
+        const normalizedWhatsAppNumber = whatsappNumber.trim()
+            ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
+            : null;
+        const normalizedUpiId = upiId.trim() ? normalizeUpiId(upiId) : null;
+        if (whatsappNumber.trim() && !normalizedWhatsAppNumber) {
+            showError(countryIso === 'IN'
+                ? 'Enter a valid 10-digit Indian mobile number beginning with 6, 7, 8, or 9.'
+                : 'Enter a valid mobile number without a leading zero.');
+            return;
+        }
+        if (upiId.trim() && !isValidUpiId(upiId)) {
+            showError('Enter a valid UPI ID such as yourname@bank.');
+            return;
+        }
+
+        setPaymentProfileSaving(true);
+        try {
+            const { data, error } = await insforge.database
+                .from('user_payment_profiles')
+                .upsert({
+                    user_id: user.id,
+                    whatsapp_number: normalizedWhatsAppNumber,
+                    upi_id: normalizedUpiId,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'user_id' })
+                .select('whatsapp_number,upi_id')
+                .single();
+            if (error) throw new Error(error.message || 'Failed to save payment details');
+
+            const persistedProfile = data as PaymentProfileRow;
+            if ((persistedProfile.upi_id || null) !== normalizedUpiId
+                || (persistedProfile.whatsapp_number || null) !== normalizedWhatsAppNumber) {
+                throw new Error('The saved payment details could not be verified. Please try again.');
+            }
+
+            const parsedPhone = splitInternationalWhatsAppNumber(persistedProfile.whatsapp_number);
+            setCountryIso(parsedPhone.countryIso);
+            setWhatsappNumber(parsedPhone.localNumber);
+            setUpiId(persistedProfile.upi_id || '');
+            setSavedPaymentProfile(persistedProfile);
+            setPaymentDetailsEditing(false);
+            window.dispatchEvent(new CustomEvent('splitmate:payment-profile-changed'));
+            success('Payment details saved successfully!');
+        } catch (error) {
+            showError(error instanceof Error ? error.message : 'Failed to save payment details');
+        } finally {
+            setPaymentProfileSaving(false);
         }
     };
 
@@ -326,7 +346,18 @@ export default function Settings() {
                                     {upiId.trim() && !isValidUpiId(upiId) ? <p className="mt-1 text-[11px] text-danger">Enter a valid ID such as name@bank.</p> : null}
                                 </div>
 
-                                {savedPaymentProfile ? <button type="button" onClick={cancelPaymentDetailsEdit} className="ghost-button inline-flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-bold"><X className="h-4 w-4" /> Cancel editing</button> : null}
+                                {savedPaymentProfile?.whatsapp_number || savedPaymentProfile?.upi_id ? (
+                                    <button type="button" onClick={cancelPaymentDetailsEdit} className="ghost-button inline-flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-bold"><X className="h-4 w-4" /> Cancel editing</button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={() => void savePaymentDetails()}
+                                    disabled={paymentProfileSaving}
+                                    className="accent-button inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold"
+                                >
+                                    {paymentProfileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                    Save WhatsApp & UPI
+                                </button>
                             </div>
                         )}
 
