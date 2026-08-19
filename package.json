@@ -10,6 +10,7 @@
     "test:auth": "node --test tests/auth-proxy.test.mjs",
     "test:payments": "node --test tests/payment-links.test.mjs",
     "test:payment-center": "node --test tests/payment-aggregation.test.mjs",
+    "test:storage": "node --test tests/storage.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

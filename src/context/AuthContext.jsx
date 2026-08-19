@@ -167,8 +167,17 @@ export function AuthProvider({ children }) {
     window.location.replace('/login');
   };
 
+  const refreshProfile = async () => {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error || !data.session?.user) throw new Error(error?.message || 'Authentication required');
+    const hydrated = await hydrateAppUser(data.session.user);
+    setUser(hydrated.user);
+    setRole(hydrated.role);
+    return hydrated.user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, role, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, role, loading, signIn, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

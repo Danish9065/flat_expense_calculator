@@ -7,6 +7,8 @@ import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldC
 import { isValidUpiId, normalizeUpiId } from '../lib/paymentLinks';
 import { deleteStorageReference, safeStorageFileName, uploadPrivateFile } from '../lib/storage';
 import CountryCodeSelect from '../components/CountryCodeSelect';
+import SecureStorageImage from '../components/SecureStorageImage';
+import imageCompression from 'browser-image-compression';
 import {
     buildInternationalWhatsAppNumber,
     formatInternationalPhone,
@@ -20,12 +22,13 @@ interface PaymentProfileRow {
 }
 
 export default function Settings() {
-    const { user, signOut } = useAuth();
+    const { user, signOut, refreshProfile } = useAuth();
     const { success, error: showError } = useToast();
 
     const [fullName, setFullName] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
     const [avatarFile, setAvatarFile] = useState<File | null>(null);
+    const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('');
     const [currency, setCurrency] = useState('₹');
     const [countryIso, setCountryIso] = useState('IN');
     const [whatsappNumber, setWhatsappNumber] = useState('');
@@ -36,6 +39,16 @@ export default function Settings() {
     const [paymentDetailsEditing, setPaymentDetailsEditing] = useState(true);
 
     // Password updates removed: unsupported by lightweight auth SDK.
+
+    useEffect(() => {
+        if (!avatarFile) {
+            setAvatarPreviewUrl('');
+            return;
+        }
+        const previewUrl = URL.createObjectURL(avatarFile);
+        setAvatarPreviewUrl(previewUrl);
+        return () => URL.revokeObjectURL(previewUrl);
+    }, [avatarFile]);
 
     useEffect(() => {
         if (user) {
@@ -83,15 +96,20 @@ export default function Settings() {
         }
         setProfileLoading(true);
 
+        let uploadedAvatarReference: string | null = null;
+        let avatarWasPersisted = false;
         try {
             let finalAvatarUrl = avatarUrl;
 
             if (avatarFile) {
-                await deleteStorageReference(avatarUrl).catch((error) => {
-                    console.warn('Could not remove the previous Supabase avatar', error);
+                const compressedAvatar = await imageCompression(avatarFile, {
+                    maxSizeMB: 0.5,
+                    maxWidthOrHeight: 1024,
+                    useWebWorker: true,
                 });
-                const objectPath = `${user.id}/${crypto.randomUUID()}-${safeStorageFileName(avatarFile.name)}`;
-                finalAvatarUrl = await uploadPrivateFile('avatars', objectPath, avatarFile);
+                const objectPath = `${user.id}/${crypto.randomUUID()}-${safeStorageFileName(compressedAvatar.name || avatarFile.name)}`;
+                uploadedAvatarReference = await uploadPrivateFile('avatars', objectPath, compressedAvatar);
+                finalAvatarUrl = uploadedAvatarReference;
             }
 
             await dbUpdate('users', `id=eq.${user.id}`, {
@@ -99,6 +117,15 @@ export default function Settings() {
                 avatar_url: finalAvatarUrl,
                 currency: currency
             });
+            avatarWasPersisted = true;
+            setAvatarUrl(finalAvatarUrl);
+            setAvatarFile(null);
+
+            if (uploadedAvatarReference && avatarUrl !== uploadedAvatarReference) {
+                await deleteStorageReference(avatarUrl).catch((error) => {
+                    console.warn('Could not remove the previous Supabase avatar', error);
+                });
+            }
 
             const { data: savedProfile, error: paymentProfileError } = await insforge.database
                 .from('user_payment_profiles')
@@ -129,9 +156,14 @@ export default function Settings() {
                 console.log('Skipping legacy auth profile save', err);
             }
 
+            await refreshProfile();
+
             success('Profile updated successfully!');
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
+            if (uploadedAvatarReference && !avatarWasPersisted) {
+                await deleteStorageReference(uploadedAvatarReference).catch(() => undefined);
+            }
             showError(err.message || 'Error updating profile');
         } finally {
             setProfileLoading(false);
@@ -176,6 +208,21 @@ export default function Settings() {
 
                     <div>
                         <label className="app-label mb-2 block">Avatar Photo</label>
+                        <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                            <div className="h-16 w-16 overflow-hidden rounded-full border-2 border-white/10 bg-primary/15">
+                                {avatarPreviewUrl ? (
+                                    <img src={avatarPreviewUrl} alt="Selected avatar preview" className="h-full w-full object-cover" />
+                                ) : avatarUrl ? (
+                                    <SecureStorageImage source={avatarUrl} alt="Current avatar" className="h-full w-full object-cover" />
+                                ) : (
+                                    <div className="grid h-full w-full place-items-center text-xl font-bold text-primary">{fullName.trim().charAt(0).toUpperCase() || '?'}</div>
+                                )}
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-white">{avatarFile ? 'New photo selected' : avatarUrl ? 'Current profile photo' : 'No profile photo yet'}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">JPG, PNG or WebP. Images are optimized before upload.</p>
+                            </div>
+                        </div>
                         <div className="mt-1 flex justify-center px-6 py-4 border border-white/10 border-dashed rounded-xl hover:bg-white/[0.04] transition-colors">
                             <div className="space-y-1 text-center">
                                 <ImageIcon className="mx-auto h-8 w-8 text-muted-foreground" />

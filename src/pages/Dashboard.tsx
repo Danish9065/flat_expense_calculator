@@ -11,6 +11,7 @@ import ConfirmModal from '../components/ConfirmModal';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 import SecureStorageLink from '../components/SecureStorageLink';
+import SecureStorageImage from '../components/SecureStorageImage';
 import { deleteStorageReference } from '../lib/storage';
 
 interface ExpenseSplitRow {
@@ -401,6 +402,11 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                         {expense.receipt_url && (
                             <div className="mb-3">
                                 <p className="app-label mb-1">Bill / Receipt</p>
+                                <SecureStorageImage
+                                    source={expense.receipt_url}
+                                    alt={`Receipt for ${expense.item_name}`}
+                                    className="mb-2 max-h-72 w-full rounded-xl border border-white/10 bg-black/20 object-contain"
+                                />
                                 <SecureStorageLink reference={expense.receipt_url} />
                             </div>
                         )}

@@ -31,9 +31,20 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     const [note, setNote] = useState('');
     const [splitBetween, setSplitBetween] = useState<string[]>([]);
     const [receiptFile, setReceiptFile] = useState<File | null>(null);
+    const [receiptPreviewUrl, setReceiptPreviewUrl] = useState('');
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurType, setRecurType] = useState<'weekly' | 'monthly'>('monthly');
     const [loadingState, setLoadingState] = useState<'idle' | 'compressing' | 'uploading' | 'saving'>('idle');
+
+    useEffect(() => {
+        if (!receiptFile) {
+            setReceiptPreviewUrl('');
+            return;
+        }
+        const previewUrl = URL.createObjectURL(receiptFile);
+        setReceiptPreviewUrl(previewUrl);
+        return () => URL.revokeObjectURL(previewUrl);
+    }, [receiptFile]);
 
     useEffect(() => {
         if (isOpen) {
@@ -238,6 +249,11 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                         {/* Receipt Upload */}
                         <div className="py-5">
                             <label className="app-label mb-2 block">Receipt Photo</label>
+                            {receiptPreviewUrl ? (
+                                <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                                    <img src={receiptPreviewUrl} alt="Selected receipt preview" className="max-h-56 w-full object-contain" />
+                                </div>
+                            ) : null}
                             <div className="mt-1 flex justify-center px-6 py-4 border border-white/10 border-dashed rounded-xl hover:bg-white/[0.04] transition-colors">
                                 <div className="space-y-1 text-center">
                                     <Receipt className="mx-auto h-8 w-8 text-muted-foreground" />
