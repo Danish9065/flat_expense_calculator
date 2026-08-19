@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { supabaseClient } from '../lib/db';
 import {
   clearPersistentSession,
-  readPersistentSession,
   writePersistentSession,
 } from '../lib/authSession';
 
@@ -70,9 +69,11 @@ async function hydrateAppUser(authUser) {
 }
 
 export function AuthProvider({ children }) {
-  const cached = readPersistentSession();
-  const [user, setUser] = useState(cached?.user || null);
-  const [role, setRole] = useState(cached?.role || null);
+  // Do not expose the display cache as an authenticated identity. Supabase
+  // restores its persisted session asynchronously, and consumers must wait for
+  // that authoritative result before making RLS-protected requests.
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

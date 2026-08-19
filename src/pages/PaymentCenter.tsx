@@ -25,7 +25,7 @@ interface ProfileSummary {
 
 export default function PaymentCenter() {
   const { user } = useAuth();
-  const { groups } = useGroup();
+  const { groups, loading: groupLoading, error: groupError, refreshGroup } = useGroup();
   const { success, error: showError } = useToast();
   const [view, setView] = useState<'all' | 'group'>('all');
   const [payments, setPayments] = useState<ConsolidatedPayment[]>([]);
@@ -38,7 +38,7 @@ export default function PaymentCenter() {
   const groupList = useMemo(() => (groups || []) as GroupSummary[], [groups]);
 
   const loadAllPayments = useCallback(async (silent = false) => {
-    if (!user) return;
+    if (!user || groupLoading) return;
     if (silent) setRefreshing(true);
     else setLoading(true);
 
@@ -76,7 +76,7 @@ export default function PaymentCenter() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [groupList, showError, user]);
+  }, [groupList, groupLoading, showError, user]);
 
   useEffect(() => {
     if (view === 'all') void loadAllPayments();
@@ -134,9 +134,11 @@ export default function PaymentCenter() {
         <button type="button" role="tab" aria-selected={view === 'group'} onClick={() => setView('group')} className={`min-h-11 rounded-xl px-3 text-sm font-bold transition-colors ${view === 'group' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-white'}`}>Group details</button>
       </div>
 
-      {view === 'group' ? (
+      {groupError && groupList.length === 0 ? (
+        <div className="app-panel mx-auto max-w-md p-6 text-center"><h2 className="text-lg font-bold text-white">We couldn't load your groups</h2><p className="mt-2 text-sm text-muted-foreground">Your payment data is safe. Check your connection and try again.</p><button type="button" onClick={() => void refreshGroup()} className="accent-button mt-5 min-h-11 rounded-xl px-5 font-bold">Try again</button></div>
+      ) : view === 'group' ? (
         <Suspense fallback={<div className="grid min-h-64 place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}><Balance embedded /></Suspense>
-      ) : loading ? (
+      ) : loading || groupLoading ? (
         <div className="grid min-h-[50vh] place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
       ) : (
         <>

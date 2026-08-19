@@ -44,6 +44,14 @@ type QueryBuilder = {
 };
 
 async function executeWithRetry<T = unknown>(queryFn: () => PromiseLike<QueryResult<T>>): Promise<T | undefined> {
+  // Auth restoration is asynchronous on a cold browser start. Waiting here
+  // prevents an authenticated query from being sent with the publishable key
+  // only, which PostgREST correctly rejects and the UI could mistake for an
+  // empty account.
+  const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+  if (sessionError) throw new Error(sessionError.message);
+  if (!sessionData.session) throw new Error('Authentication required');
+
   let result = await queryFn();
 
   if (result.error) {

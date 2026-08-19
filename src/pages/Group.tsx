@@ -13,7 +13,7 @@ import SecureStorageImage from '../components/SecureStorageImage';
 
 export default function GroupPage() {
     const { role, user } = useAuth();
-    const { groupId, groupName, inviteCode, members, groups, switchGroup, refreshGroup } = useGroup();
+    const { groupId, groupName, inviteCode, members, groups, switchGroup, refreshGroup, loading: groupLoading, error: groupError } = useGroup();
     const { success, error: showError } = useToast();
     const [regenerating, setRegenerating] = useState(false);
     const [exporting, setExporting] = useState(false);
@@ -240,6 +240,22 @@ export default function GroupPage() {
             setExporting(false);
         }
     };
+
+    if (groupLoading) {
+        return <div className="grid min-h-[70vh] place-items-center"><RefreshCw className="h-8 w-8 animate-spin text-primary" /></div>;
+    }
+
+    if (groupError && !groupId) {
+        return (
+            <div className="grid min-h-[70vh] place-items-center px-6 text-center">
+                <div className="app-panel max-w-md p-6">
+                    <h1 className="text-lg font-bold text-white">We couldn't load your groups</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">Your group data is safe. Check your connection and try again.</p>
+                    <button type="button" onClick={() => void refreshGroup()} className="accent-button mt-5 min-h-11 rounded-xl px-5 font-bold">Try again</button>
+                </div>
+            </div>
+        );
+    }
 
     if (!groupId && !isAdmin) {
         return (

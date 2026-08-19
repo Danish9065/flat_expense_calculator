@@ -13,30 +13,51 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
     if (!groupId) return;
 
     const handleEvent = () => onDataChangedRef.current();
-    const filter = `group_id=eq.${groupId}`;
-    const channel = supabaseClient
-      .channel(`group-data:${groupId}`)
-      .on('broadcast', { event: 'data-changed' }, handleEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter }, handleEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter }, handleEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter }, handleEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter }, handleEvent)
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`[Realtime] Group channel ${status.toLowerCase()}`);
-        }
-      });
+    let cancelled = false;
+    let channel: ReturnType<typeof supabaseClient.channel> | null = null;
+
+    const connect = async () => {
+      const { data } = await supabaseClient.auth.getSession();
+      if (cancelled || !data.session?.access_token) return;
+
+      // Realtime maintains its own socket authorization state. Explicitly give
+      // it the restored/refreshed access token before opening a protected
+      // channel so it cannot enter an unauthorized reconnect loop.
+      await supabaseClient.realtime.setAuth(data.session.access_token);
+      if (cancelled) return;
+
+      const filter = `group_id=eq.${groupId}`;
+      channel = supabaseClient
+        .channel(`group-data:${groupId}`)
+        .on('broadcast', { event: 'data-changed' }, handleEvent)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter }, handleEvent)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter }, handleEvent)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter }, handleEvent)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter }, handleEvent)
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn(`[Realtime] Group channel ${status.toLowerCase()}`);
+          }
+        });
+    };
+
+    void connect();
 
     window.addEventListener('focus', handleEvent);
     return () => {
+      cancelled = true;
       window.removeEventListener('focus', handleEvent);
-      void supabaseClient.removeChannel(channel);
+      if (channel) void supabaseClient.removeChannel(channel);
     };
   }, [groupId]);
 }
 
 export async function notifyGroupDataChanged(groupId: string) {
   if (!groupId) return;
+
+  const { data } = await supabaseClient.auth.getSession();
+  if (!data.session?.access_token) return;
+  await supabaseClient.realtime.setAuth(data.session.access_token);
 
   const channel = supabaseClient.channel(`group-data:${groupId}`);
   await new Promise<void>((resolve) => {

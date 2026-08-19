@@ -54,7 +54,7 @@ interface ExpenseCardProps {
 
 export default function Dashboard() {
     const { user } = useAuth();
-    const { currentGroup, members, groupId } = useGroup();
+    const { currentGroup, members, groupId, loading: groupLoading, error: groupError, refreshGroup } = useGroup();
     const { success, error: showError } = useToast();
 
     const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
@@ -190,6 +190,22 @@ export default function Dashboard() {
 
 
     const filteredExpenses = expenses.filter(e => filterMode === 'all' || e.category === filterMode);
+
+    if (groupLoading) {
+        return <div className="grid min-h-[70vh] place-items-center"><RefreshCw className="h-8 w-8 animate-spin text-primary" /></div>;
+    }
+
+    if (groupError && !groupId) {
+        return (
+            <div className="grid min-h-[70vh] place-items-center px-6 text-center">
+                <div className="app-panel max-w-md p-6">
+                    <h1 className="text-lg font-bold text-white">We couldn't load your groups</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">Your data is safe. Check your connection and try again.</p>
+                    <button type="button" onClick={() => void refreshGroup()} className="accent-button mt-5 min-h-11 rounded-xl px-5 font-bold">Try again</button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="app-section pb-28 min-h-screen">
