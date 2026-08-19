@@ -1,26 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import insforge from '../../lib/db';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { supabaseClient } from '../../lib/db';
+import { useNavigate, Link } from 'react-router-dom';
 import { Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 
 export default function ResetPassword() {
-    const location = useLocation();
     const navigate = useNavigate();
     const { success, error: showError } = useToast();
-
-    const resetToken = location.state?.resetToken || '';
-    const email = location.state?.email || '';
 
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showNew, setShowNew] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [sessionReady, setSessionReady] = useState(false);
 
     useEffect(() => {
-        if (!resetToken) navigate('/forgot-password');
-    }, [resetToken, navigate]);
+        let active = true;
+        void supabaseClient.auth.getSession().then(({ data }) => {
+            if (!active) return;
+            if (data.session) setSessionReady(true);
+            else navigate('/forgot-password', { replace: true });
+        });
+        return () => { active = false; };
+    }, [navigate]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -37,14 +40,12 @@ export default function ResetPassword() {
 
         setLoading(true);
         try {
-            const { error } = await insforge.auth.resetPassword({
-                newPassword,
-                otp: resetToken,
-            });
+            const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
 
             if (error) throw new Error(error.message || 'Failed to reset password');
 
             success('Password reset successfully! Please log in.');
+            await supabaseClient.auth.signOut({ scope: 'local' });
             navigate('/login');
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');
@@ -62,12 +63,7 @@ export default function ResetPassword() {
                 <h2 className="auth-heading">
                     Set new password
                 </h2>
-                {email && (
-                    <p className="auth-copy">
-                        Resetting password for{' '}
-                        <span className="font-medium text-white">{email}</span>
-                    </p>
-                )}
+                <p className="auth-copy">Choose a new password for your verified account.</p>
             </div>
 
             <div className="auth-card-wrap">
@@ -133,7 +129,7 @@ export default function ResetPassword() {
                         <div>
                             <button
                             type="submit"
-                            disabled={loading || !newPassword || !confirmPassword}
+                            disabled={!sessionReady || loading || !newPassword || !confirmPassword}
                                 className="auth-submit"
                             >
                                 {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Reset Password'}

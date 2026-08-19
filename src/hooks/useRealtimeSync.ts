@@ -1,17 +1,8 @@
 import { useEffect, useRef } from 'react';
-import insforge from '../lib/db';
+import { supabaseClient } from '../lib/db';
 
-/**
- * Subscribes to a group-scoped realtime channel on InsForge.
- * When any member publishes a 'data-changed' event on this group's channel,
- * the provided `onDataChanged` callback is called so callers can re-fetch.
- *
- * Also re-fetches when the window regains focus (Fix 3).
- *
- * The channel is automatically unsubscribed on unmount or when groupId changes.
- */
+/** Re-fetches group data after database changes or an explicit group broadcast. */
 export function useRealtimeSync(groupId: string | null, onDataChanged: () => void) {
-  // Keep a stable ref so the effect closure always calls the latest version
   const onDataChangedRef = useRef(onDataChanged);
 
   useEffect(() => {
@@ -21,60 +12,45 @@ export function useRealtimeSync(groupId: string | null, onDataChanged: () => voi
   useEffect(() => {
     if (!groupId) return;
 
-    const channel = `group-data:${groupId}`;
-    let subscribed = false;
-
-    const handleEvent = () => {
-      onDataChangedRef.current();
-    };
-
-    // Connect + subscribe to the group channel
-    (async () => {
-      try {
-        await insforge.realtime.connect();
-        const result = await insforge.realtime.subscribe(channel);
-        if (result.ok) {
-          subscribed = true;
-          insforge.realtime.on('data-changed', handleEvent);
-        } else if ('error' in result) {
-          console.warn('[Realtime] Failed to subscribe:', result.error?.message);
+    const handleEvent = () => onDataChangedRef.current();
+    const filter = `group_id=eq.${groupId}`;
+    const channel = supabaseClient
+      .channel(`group-data:${groupId}`)
+      .on('broadcast', { event: 'data-changed' }, handleEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter }, handleEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter }, handleEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter }, handleEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter }, handleEvent)
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`[Realtime] Group channel ${status.toLowerCase()}`);
         }
-      } catch (err) {
-        console.warn('[Realtime] Connection error:', err);
-      }
-    })();
+      });
 
-    // Fix 3: Re-fetch on window focus
-    const handleFocus = () => onDataChangedRef.current();
-    window.addEventListener('focus', handleFocus);
-
+    window.addEventListener('focus', handleEvent);
     return () => {
-      window.removeEventListener('focus', handleFocus);
-      if (subscribed) {
-        insforge.realtime.off('data-changed', handleEvent);
-        insforge.realtime.unsubscribe(channel);
-      }
+      window.removeEventListener('focus', handleEvent);
+      void supabaseClient.removeChannel(channel);
     };
   }, [groupId]);
 }
 
-/**
- * Publishes a 'data-changed' event to the group channel so all
- * other subscribed clients know to re-fetch. Call this after any
- * write operation (add expense, delete expense, settle up).
- */
 export async function notifyGroupDataChanged(groupId: string) {
   if (!groupId) return;
-  const channel = `group-data:${groupId}`;
-  try {
-    // Make sure we're subscribed before publishing
-    await insforge.realtime.connect();
-    await insforge.realtime.subscribe(channel);
-    await insforge.realtime.publish(channel, 'data-changed', {
-      ts: Date.now(),
+
+  const channel = supabaseClient.channel(`group-data:${groupId}`);
+  await new Promise<void>((resolve) => {
+    const timeout = window.setTimeout(resolve, 2_000);
+    channel.subscribe(async (status) => {
+      if (status !== 'SUBSCRIBED') return;
+      window.clearTimeout(timeout);
+      await channel.send({
+        type: 'broadcast',
+        event: 'data-changed',
+        payload: { groupId, timestamp: Date.now() },
+      });
+      resolve();
     });
-  } catch (err) {
-    // Non-fatal — the writer's own optimistic update already applied
-    console.warn('[Realtime] Failed to publish data-changed event:', err);
-  }
+  });
+  await supabaseClient.removeChannel(channel);
 }

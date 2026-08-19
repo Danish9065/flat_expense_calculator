@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/ConfirmModal';
 import { Copy, RefreshCw, Download, Users, Shield, User as UserIcon } from 'lucide-react';
 import { format } from 'date-fns';
+import SecureStorageImage from '../components/SecureStorageImage';
 
 export default function GroupPage() {
     const { role, user } = useAuth();
@@ -39,7 +40,7 @@ export default function GroupPage() {
             if (!newGroup?.id) throw new Error('Failed to create group');
             // Add admin as member
             try {
-                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Admin', role: 'admin' }, { onConflict: 'id' }).select();
+                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
             } catch { /* safe to ignore, user might already exist */ }
 
             await dbInsert('group_members', { group_id: newGroup.id, user_id: user.id });
@@ -58,23 +59,18 @@ export default function GroupPage() {
         if (!joinCode.trim() || !user) return;
         setJoining(true);
         try {
-            // Find group by invite code
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const groupList: any = await dbQuery('groups', `invite_code=eq.${joinCode.toUpperCase()}&select=id`);
-            const group = groupList?.[0];
-
-            if (!group) throw new Error('Invalid invite code');
-
             // Ensure user exists in users table first (patch for early signups)
             try {
-                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member', role: 'member' }, { onConflict: 'id' }).select();
+                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
             } catch { /* safe to ignore, user might already exist */ }
 
-            // Insert member
-            await dbInsert('group_members', { group_id: group.id, user_id: user.id });
+            const { data: joinedGroupId, error: joinError } = await insforge.database.rpc('join_group_by_invite_code', {
+                invite_code_param: joinCode.trim().toUpperCase(),
+            });
+            if (joinError || !joinedGroupId) throw new Error(joinError?.message || 'Invalid invite code');
 
             success('Joined group successfully!');
-            await switchGroup(group.id);
+            await switchGroup(String(joinedGroupId));
             setJoinCode('');
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
@@ -347,7 +343,7 @@ export default function GroupPage() {
                                         <div className="flex items-center space-x-3">
                                             <div className="w-10 h-10 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-lg overflow-hidden shrink-0">
                                                 {mUser?.avatar_url ? (
-                                                    <img src={mUser.avatar_url} alt="" className="w-full h-full object-cover" />
+                                                    <SecureStorageImage source={mUser.avatar_url} alt="" className="w-full h-full object-cover" />
                                                 ) : (
                                                     fallbackInitial
                                                 )}

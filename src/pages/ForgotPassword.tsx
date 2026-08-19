@@ -16,16 +16,16 @@ export default function ForgotPassword() {
         setLoading(true);
 
         try {
-            const { error } = await insforge.auth.sendResetPasswordEmail({
-                email,
+            const { error } = await insforge.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/reset-password`,
             });
 
             if (error) {
                 throw new Error(error.message || 'Failed to send reset email');
             }
 
-            success('OTP sent! Check your inbox.');
-            navigate('/verify-password-otp', { state: { email } });
+            success('Password reset link sent! Check your inbox.');
+            navigate('/login');
 
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');
@@ -44,7 +44,7 @@ export default function ForgotPassword() {
                     Forgot Password
                 </h2>
                 <p className="auth-copy">
-                    Enter your email and we'll send you a 6-digit OTP.
+                    Enter your email and we'll send you a secure reset link.
                 </p>
             </div>
 
@@ -74,7 +74,7 @@ export default function ForgotPassword() {
                                 disabled={loading || !email}
                                 className="auth-submit"
                             >
-                                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Send OTP'}
+                                {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Send reset link'}
                             </button>
                         </div>
                     </form>

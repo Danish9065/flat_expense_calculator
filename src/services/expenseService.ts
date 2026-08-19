@@ -100,8 +100,15 @@ export const ExpenseService = {
     },
 
     async editExpense(expenseId: string, updates: Partial<ExpenseData>) {
-        const { splitBetween: _splitBetween, ...dbPayload } = updates;
+        const {
+            splitBetween: _splitBetween,
+            group_id: _groupId,
+            added_by: _addedBy,
+            ...dbPayload
+        } = updates;
         void _splitBetween;
+        void _groupId;
+        void _addedBy;
 
         const updatedExpenses = await dbUpdate('expenses', `id=eq.${expenseId}`, {
             ...dbPayload,

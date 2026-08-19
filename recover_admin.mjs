@@ -1,6 +1,12 @@
 import { createClient } from '@insforge/sdk';
 
-const client = createClient('https://7wsi38g7.us-east.insforge.app', 'ik_e46b631c373568bc5aa278c0eb0085e2b690567d93569ff5b997c803f70ed76d');
+const baseUrl = process.env.INSFORGE_URL;
+const apiKey = process.env.INSFORGE_API_KEY;
+if (!baseUrl || !apiKey) {
+  throw new Error('INSFORGE_URL and INSFORGE_API_KEY are required');
+}
+
+const client = createClient(baseUrl, apiKey);
 
 async function main() {
   const { data, error } = await client.auth.signUp({

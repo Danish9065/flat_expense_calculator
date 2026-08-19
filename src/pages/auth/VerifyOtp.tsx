@@ -1,112 +1,32 @@
-import { useState, useRef, useEffect, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react';
-import insforge from '../../lib/db';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Mail, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Loader2, Mail } from 'lucide-react';
+import { supabaseClient } from '../../lib/db';
 import { useToast } from '../../context/ToastContext';
 
 export default function VerifyOtp() {
     const location = useLocation();
     const navigate = useNavigate();
     const { success, error: showError } = useToast();
-
-    // Recover our state from the React Router `navigate` call
     const email = location.state?.email || '';
-    const fullName = location.state?.fullName || '';
-    const inviteKey = location.state?.inviteKey || '';
-    const whatsappNumber = location.state?.whatsappNumber || null;
-    const upiId = location.state?.upiId || null;
-
-    const [otp, setOtp] = useState(['', '', '', '', '', '']);
-    const [loading, setLoading] = useState(false);
     const [resending, setResending] = useState(false);
-    const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
     useEffect(() => {
-        if (!email) navigate('/signup');
-        inputs.current[0]?.focus();
+        if (!email) navigate('/signup', { replace: true });
     }, [email, navigate]);
-
-    const handleChange = (index: number, value: string) => {
-        if (!/^\d*$/.test(value)) return;
-        const newOtp = [...otp];
-        newOtp[index] = value.slice(-1);
-        setOtp(newOtp);
-        if (value && index < 5) inputs.current[index + 1]?.focus();
-    };
-
-    const handleKeyDown = (index: number, e: KeyboardEvent) => {
-        if (e.key === 'Backspace' && !otp[index] && index > 0) {
-            inputs.current[index - 1]?.focus();
-        }
-    };
-
-    const handlePaste = (e: ClipboardEvent) => {
-        const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-        if (pasted.length === 6) {
-            setOtp(pasted.split(''));
-            inputs.current[5]?.focus();
-        }
-    };
-
-    const handleVerify = async (e: FormEvent) => {
-        e.preventDefault();
-        const token = otp.join('');
-        if (token.length !== 6) return;
-        setLoading(true);
-        try {
-            const { data, error } = await insforge.auth.verifyEmail({
-                email,
-                otp: token
-            });
-            if (error) throw new Error(error.message || 'Invalid OTP');
-
-            // The user is finally generated and fully authenticated at this exact moment. 
-            // We can now safely access their ID and update the backend!
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const userId = (data as any)?.session?.user?.id || (data as any)?.user?.id;
-
-            if (userId && fullName && inviteKey) {
-                // Upsert to public.users first to satisfy foreign key constraints
-                const { error: upsertError } = await insforge.database.from('users')
-                    .upsert({ id: userId, full_name: fullName, email, role: 'member' });
-
-                if (upsertError) console.error("Could not create user profile:", upsertError);
-
-                if (whatsappNumber || upiId) {
-                    const { error: paymentProfileError } = await insforge.database
-                        .from('user_payment_profiles')
-                        .upsert({ user_id: userId, whatsapp_number: whatsappNumber, upi_id: upiId }, { onConflict: 'user_id' });
-                    if (paymentProfileError) console.error('Could not save optional payment details:', paymentProfileError);
-                }
-
-                // Now burn the passed invite key and add them to the group
-                const { error: rpcError } = await insforge.database.rpc('consume_invite_key', {
-                    key_code_param: inviteKey,
-                    target_user_id: userId
-                });
-
-                if (rpcError) console.error("Failed to consume invite key:", rpcError);
-            }
-
-            success('Email verified! You can now log in.');
-            navigate('/login');
-        } catch (err: unknown) {
-            showError(err instanceof Error ? err.message : 'Verification failed');
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleResend = async () => {
         setResending(true);
         try {
-            const { error } = await insforge.auth.resendVerificationEmail({
-                email
+            const { error } = await supabaseClient.auth.resend({
+                type: 'signup',
+                email,
+                options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
             });
-            if (error) throw new Error(error.message);
-            success('OTP resent! Check your email.');
-        } catch (err: unknown) {
-            showError(err instanceof Error ? err.message : 'Failed to resend OTP');
+            if (error) throw error;
+            success('Verification link resent. Check your inbox.');
+        } catch (error) {
+            showError(error instanceof Error ? error.message : 'Failed to resend verification email');
         } finally {
             setResending(false);
         }
@@ -115,57 +35,24 @@ export default function VerifyOtp() {
     return (
         <div className="auth-shell">
             <div className="auth-header">
-                <div className="auth-mark">
-                    <Mail className="h-7 w-7" />
-                </div>
-                <h2 className="auth-heading">
-                    Verify your email
-                </h2>
+                <div className="auth-mark"><Mail className="h-7 w-7" /></div>
+                <h2 className="auth-heading">Verify your email</h2>
                 <p className="auth-copy">
-                    We sent a 6-digit code to<br />
+                    We sent a secure verification link to<br />
                     <span className="font-medium text-white">{email}</span>
                 </p>
             </div>
 
             <div className="auth-card-wrap">
-                <div className="auth-card">
-                    <form onSubmit={handleVerify} className="space-y-6">
-                        <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
-                            {otp.map((digit, i) => (
-                                <input
-                                    key={i}
-                                    ref={el => { inputs.current[i] = el; }}
-                                    type="text"
-                                    inputMode="numeric"
-                                    maxLength={1}
-                                    value={digit}
-                                    onChange={e => handleChange(i, e.target.value)}
-                                    onKeyDown={e => handleKeyDown(i, e)}
-                                    className="otp-cell"
-                                />
-                            ))}
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={otp.join('').length !== 6 || loading}
-                            className="auth-submit"
-                        >
-                            {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Verify Email'}
-                        </button>
-
-                        <p className="text-center text-sm text-muted-foreground">
-                            Didn't receive the code?{' '}
-                            <button
-                                type="button"
-                                onClick={handleResend}
-                                disabled={resending}
-                                className="font-medium text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
-                            >
-                                {resending ? 'Sending...' : 'Resend OTP'}
-                            </button>
-                        </p>
-                    </form>
+                <div className="auth-card space-y-5 text-center">
+                    <p className="text-sm leading-6 text-muted-foreground">
+                        Open the link in the email. Your profile and invite will be completed automatically,
+                        even if you open it on another device.
+                    </p>
+                    <button type="button" onClick={handleResend} disabled={resending} className="auth-submit">
+                        {resending ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Resend verification link'}
+                    </button>
+                    <Link to="/login" className="auth-secondary-action">Back to login</Link>
                 </div>
             </div>
         </div>

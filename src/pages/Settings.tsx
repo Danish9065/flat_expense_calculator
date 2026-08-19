@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards } from 'lucide-react';
 import { isValidUpiId, isValidWhatsAppNumber, normalizeUpiId, normalizeWhatsAppNumber } from '../lib/paymentLinks';
+import { deleteStorageReference, safeStorageFileName, uploadPrivateFile } from '../lib/storage';
 
 interface PaymentProfileRow {
     whatsapp_number?: string | null;
@@ -61,35 +62,11 @@ export default function Settings() {
             let finalAvatarUrl = avatarUrl;
 
             if (avatarFile) {
-                // Delete old avatar if exists and it's from our storage
-                if (avatarUrl && avatarUrl.includes('/avatars/')) {
-                    const urlParts = avatarUrl.split('/');
-                    const fileName = decodeURIComponent(urlParts[urlParts.length - 1]);
-                    if (fileName) {
-                        try {
-                            await insforge.storage.from('avatars').remove(fileName);
-                        } catch (err) {
-                            console.log('Skipping removal of old avatar', err);
-                        }
-                    }
-                }
-
-                const { data, error: uploadErr } = await insforge.storage
-                    .from('avatars')
-                    .uploadAuto(avatarFile);
-
-                if (uploadErr) {
-                    const errStr = uploadErr.message?.toLowerCase() || '';
-                    if (errStr.includes('already exists') || errStr.includes('duplicate')) {
-                        // The file is already safely uploaded natively
-                        finalAvatarUrl = avatarUrl;
-                    } else {
-                        console.error('Storage error details:', uploadErr);
-                        throw new Error(uploadErr.message || 'Failed to upload avatar');
-                    }
-                } else if (data?.url) {
-                    finalAvatarUrl = data.url;
-                }
+                await deleteStorageReference(avatarUrl).catch((error) => {
+                    console.warn('Could not remove the previous Supabase avatar', error);
+                });
+                const objectPath = `${user.id}/${crypto.randomUUID()}-${safeStorageFileName(avatarFile.name)}`;
+                finalAvatarUrl = await uploadPrivateFile('avatars', objectPath, avatarFile);
             }
 
             await dbUpdate('users', `id=eq.${user.id}`, {
@@ -110,9 +87,8 @@ export default function Settings() {
 
             // Optionally update auth user meta data as well
             try {
-                await insforge.auth.setProfile({
-                    name: fullName,
-                    avatar_url: finalAvatarUrl
+                await insforge.auth.updateUser({
+                    data: { full_name: fullName, avatar_url: finalAvatarUrl }
                 });
             } catch (err) {
                 console.log('Skipping legacy auth profile save', err);

@@ -5,7 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import VerifyOtp from './pages/auth/VerifyOtp';
-import VerifyPasswordOTP from './pages/auth/VerifyPasswordOTP';
+import AuthCallback from './pages/auth/AuthCallback';
 import ResetPassword from './pages/auth/ResetPassword';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
@@ -69,8 +69,9 @@ function App() {
                     <Route path="/login" element={<div className="-mt-16 md:-mt-20"><Login /></div>} />
                     <Route path="/signup" element={<div className="-mt-16 md:-mt-20"><Signup /></div>} />
                     <Route path="/verify-otp" element={<div className="-mt-16 md:-mt-20"><VerifyOtp /></div>} />
+                    <Route path="/auth/callback" element={<div className="-mt-16 md:-mt-20"><AuthCallback /></div>} />
                     <Route path="/forgot-password" element={<div className="-mt-16 md:-mt-20"><ForgotPassword /></div>} />
-                    <Route path="/verify-password-otp" element={<div className="-mt-16 md:-mt-20"><VerifyPasswordOTP /></div>} />
+                    <Route path="/verify-password-otp" element={<Navigate to="/forgot-password" replace />} />
                     <Route path="/reset-password" element={<div className="-mt-16 md:-mt-20"><ResetPassword /></div>} />
 
                     {/* Protected Routes */}

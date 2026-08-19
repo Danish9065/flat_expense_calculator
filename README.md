@@ -5,7 +5,7 @@ balances, settlements, invitations, and activity updates.
 
 ## Features
 
-- Email authentication with OTP verification and password recovery
+- Persistent email authentication with verification links and password recovery
 - Invite-based group onboarding and member management
 - Shared expense tracking with receipt uploads
 - Balance summaries, category charts, and settlement workflows
@@ -18,15 +18,15 @@ balances, settlements, invitations, and activity updates.
 - React 19, TypeScript, and Vite
 - Tailwind CSS
 - React Router and Recharts
-- InsForge database, authentication, storage, and realtime services
+- Supabase database, authentication, private storage, and realtime services
 
 ## Local Development
 
-Create a `.env.local` file with the required InsForge credentials:
+Create a `.env.local` file with the public Supabase application credentials:
 
 ```env
-VITE_INSFORGE_URL=
-VITE_INSFORGE_ANON_KEY=
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
 ```
 
 Install dependencies and start the development server:

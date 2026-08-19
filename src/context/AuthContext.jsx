@@ -1,202 +1,168 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { dbQuery, setAuthToken, setLegacyRefreshToken } from '../lib/db';
+import { supabaseClient } from '../lib/db';
 import {
-  AUTH_STORAGE_KEY,
-  authClient,
   clearPersistentSession,
-  isSessionRefreshDue,
   readPersistentSession,
-  refreshPersistentSession,
-  writeCookieSession,
   writePersistentSession,
 } from '../lib/authSession';
 
 const AuthContext = createContext(null);
 
+async function provisionProfileFromMetadata(authUser) {
+  const metadata = authUser.user_metadata || {};
+  if (!metadata.full_name) return null;
+
+  const { data: profile, error: profileError } = await supabaseClient
+    .from('users')
+    .upsert({
+      id: authUser.id,
+      email: authUser.email,
+      full_name: metadata.full_name,
+      role: 'member',
+    }, { onConflict: 'id', ignoreDuplicates: true })
+    .select('role,full_name,avatar_url,currency')
+    .maybeSingle();
+
+  if (profileError) throw profileError;
+
+  if (metadata.whatsapp_number || metadata.upi_id) {
+    const { error } = await supabaseClient.from('user_payment_profiles').upsert({
+      user_id: authUser.id,
+      whatsapp_number: metadata.whatsapp_number || null,
+      upi_id: metadata.upi_id || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+    if (error) throw error;
+  }
+
+  if (metadata.invite_key) {
+    const { error } = await supabaseClient.rpc('consume_invite_key', {
+      key_code_param: metadata.invite_key,
+      target_user_id: authUser.id,
+    });
+    // Provisioning is idempotent: a previously consumed key means this step
+    // already completed on another tab/device.
+    if (error && !/already used|invalid/i.test(error.message)) throw error;
+  }
+
+  return profile;
+}
+
+async function hydrateAppUser(authUser) {
+  let { data: profile, error } = await supabaseClient
+    .from('users')
+    .select('role,full_name,avatar_url,currency')
+    .eq('id', authUser.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!profile) profile = await provisionProfileFromMetadata(authUser);
+
+  const hydratedUser = {
+    ...authUser,
+    full_name: profile?.full_name || authUser.user_metadata?.full_name || 'Member',
+    avatar_url: profile?.avatar_url || authUser.user_metadata?.avatar_url || null,
+    currency: profile?.currency || '₹',
+  };
+  const role = profile?.role || 'member';
+  writePersistentSession({ user: hydratedUser, role });
+  return { user: hydratedUser, role };
+}
+
 export function AuthProvider({ children }) {
-  // Optimistically load user data from localStorage and set token synchronously
-  const [user, setUser] = useState(() => {
-    const saved = readPersistentSession();
-    if (saved?.token) setAuthToken(saved.token);
-    if (saved?.refreshToken) setLegacyRefreshToken(saved.refreshToken);
-    return saved?.user || null;
-  });
-
-  const [role, setRole] = useState(() => readPersistentSession()?.role || null);
-
-  // Always complete the server/cookie restore before route guards decide where to go.
+  const cached = readPersistentSession();
+  const [user, setUser] = useState(cached?.user || null);
+  const [role, setRole] = useState(cached?.role || null);
   const [loading, setLoading] = useState(true);
 
-  // Global log out listener for interceptors
   useEffect(() => {
-    const handleLogout = () => {
-      clearPersistentSession();
-      setAuthToken(null);
-      setLegacyRefreshToken(null);
-      if ('caches' in window) {
-        caches.keys().then(names => Promise.all(names.map(name => caches.delete(name))));
-      }
-      setUser(null);
-      setRole(null);
-    };
-    window.addEventListener('auth:logout', handleLogout);
-    return () => window.removeEventListener('auth:logout', handleLogout);
-  }, []);
+    let active = true;
 
-  // Keep every open tab in sync. Removing the session in one tab logs out the others;
-  // token rotations and profile updates are also adopted without a reload.
-  useEffect(() => {
-    const handleStorage = (event) => {
-      if (event.key !== AUTH_STORAGE_KEY) return;
-      const saved = readPersistentSession();
-      if (!saved) {
-        setAuthToken(null);
-        setLegacyRefreshToken(null);
-      } else {
-        if (saved.token) setAuthToken(saved.token);
-        if (saved.refreshToken) setLegacyRefreshToken(saved.refreshToken);
-      }
-      setUser(saved?.user || null);
-      setRole(saved?.role || null);
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const validateSessionSilently = async () => {
-      try {
-        const cached = readPersistentSession();
-        const refreshResult = await refreshPersistentSession();
-        const activeSession = refreshResult.status === 'refreshed' ? refreshResult.session : cached;
-        const sessionUser = activeSession?.user;
-
-        if (refreshResult.status === 'refreshed') {
-          setAuthToken(refreshResult.accessToken);
-          if (refreshResult.session.refreshToken) {
-            setLegacyRefreshToken(refreshResult.session.refreshToken);
-          }
+    const adoptSession = async (session) => {
+      if (!session?.user) {
+        if (active) {
+          clearPersistentSession();
+          setUser(null);
+          setRole(null);
         }
+        return;
+      }
 
-        if (sessionUser) {
-          if (mounted) {
-            setUser(sessionUser);
-            setRole(activeSession?.role || 'member');
-          }
+      try {
+        const hydrated = await hydrateAppUser(session.user);
+        if (active) {
+          setUser(hydrated.user);
+          setRole(hydrated.role);
+        }
+      } catch (error) {
+        console.error('Failed to load the authenticated profile', error);
+        if (active) {
+          setUser(session.user);
+          setRole('member');
+        }
+      }
+    };
 
-          // Silently validate and fetch role in the background
-          try {
-            const userData = await dbQuery('users', `id=eq.${sessionUser.id}&select=role,full_name,avatar_url,currency`);
-            const data = userData?.[0];
+    supabaseClient.auth.getSession()
+      .then(({ data }) => adoptSession(data.session))
+      .finally(() => { if (active) setLoading(false); });
 
-            if (mounted && data) {
-              const updatedUser = {
-                ...sessionUser,
-                full_name: data.full_name || sessionUser.user_metadata?.full_name,
-                avatar_url: data.avatar_url || sessionUser.user_metadata?.avatar_url,
-                currency: data.currency || sessionUser.currency,
-              };
-              const userRole = data.role ?? 'member';
-
-              setUser(updatedUser);
-              setRole(userRole);
-
-              if (activeSession?.sessionMode === 'legacy') {
-                writePersistentSession({ ...activeSession, user: updatedUser, role: userRole });
-              } else {
-                writeCookieSession(updatedUser, userRole);
-              }
-            }
-          } catch (e) {
-            console.error('Failed fetching fresh user data silently', e);
-            // Leave session dormant. Do NOT wipe localStorage.
-          }
-        } else {
-          // No cookie and no cached identity means the user has never signed in on this device.
-          if (mounted) {
+    const { data: listener } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      // Defer database work until the auth callback releases its internal lock.
+      window.setTimeout(() => {
+        if (event === 'SIGNED_OUT') {
+          clearPersistentSession();
+          if (active) {
             setUser(null);
             setRole(null);
-            setAuthToken(null);
           }
+          return;
         }
-      } catch (err) {
-        console.error("Auth init exception:", err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    validateSessionSilently();
+        if (session?.user) void adoptSession(session);
+      }, 0);
+    });
 
     return () => {
-      mounted = false;
+      active = false;
+      listener.subscription.unsubscribe();
     };
   }, []);
 
-  // Refresh in the background while the app is open, and immediately after the
-  // device reconnects or the user returns to the tab.
   useEffect(() => {
-    const keepSessionFresh = async () => {
-      const saved = readPersistentSession();
-      if (!saved || !isSessionRefreshDue(saved)) return;
-      const result = await refreshPersistentSession();
-      if (result.status === 'refreshed') {
-        setAuthToken(result.accessToken);
-        setUser(result.session.user);
-        setRole(result.session.role);
-      }
+    const refreshWhenActive = async () => {
+      const { data } = await supabaseClient.auth.getSession();
+      if (data.session) await supabaseClient.auth.refreshSession();
     };
-
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void keepSessionFresh();
+      if (document.visibilityState === 'visible') void refreshWhenActive();
     };
-    const intervalId = window.setInterval(() => void keepSessionFresh(), 4 * 60_000);
-    window.addEventListener('online', keepSessionFresh);
-    document.addEventListener('visibilitychange', handleVisibility);
 
+    window.addEventListener('online', refreshWhenActive);
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('online', keepSessionFresh);
+      window.removeEventListener('online', refreshWhenActive);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
   const signIn = async (email, password) => {
-    const { data, error } = await authClient.auth.signInWithPassword({ email, password });
-    if (error || !data?.accessToken || !data.user) {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error || !data.user || !data.session) {
       throw new Error(error?.message || 'Invalid email or password');
     }
 
-    // Keep the direct database client synchronized with the cookie-backed auth client.
-    setAuthToken(data.accessToken);
-    setLegacyRefreshToken(null);
-
-    let userRole = 'member';
-    let fullName = 'Member';
-    try {
-      const userData = await dbQuery('users', `id=eq.${data.user.id}&select=role,full_name,avatar_url,currency`);
-      userRole = userData?.[0]?.role ?? 'member';
-      fullName = userData?.[0]?.full_name ?? 'Member';
-      const avatarUrl = userData?.[0]?.avatar_url;
-      const currency = userData?.[0]?.currency;
-      if (fullName !== 'Member') data.user.full_name = fullName;
-      if (avatarUrl) data.user.avatar_url = avatarUrl;
-      if (currency) data.user.currency = currency;
-    } catch (e) {
-      console.log('Role fetch failed:', e);
-    }
-
-    setUser(data.user);
-    setRole(userRole);
-    writeCookieSession(data.user, userRole);
-    window.location.replace(userRole === 'admin' ? '/admin' : '/dashboard');
+    const hydrated = await hydrateAppUser(data.user);
+    setUser(hydrated.user);
+    setRole(hydrated.role);
+    window.location.replace(hydrated.role === 'admin' ? '/admin' : '/dashboard');
   };
 
   const signOut = async () => {
-    await authClient.auth.signOut().catch(() => { });
-    window.dispatchEvent(new Event('auth:logout'));
+    const { error } = await supabaseClient.auth.signOut({ scope: 'local' });
+    if (error) console.error('Supabase sign-out failed', error);
+    clearPersistentSession();
+    setUser(null);
+    setRole(null);
     window.location.replace('/login');
   };
 

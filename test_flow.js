@@ -1,8 +1,8 @@
 import { createClient } from '@insforge/sdk';
 
 const client = createClient({
-  baseUrl: 'https://7wsi38g7.us-east.insforge.app',
-  anonKey: 'ik_e46b631c373568bc5aa278c0eb0085e2b690567d93569ff5b997c803f70ed76d'
+  baseUrl: process.env.INSFORGE_URL,
+  anonKey: process.env.INSFORGE_API_KEY,
 });
 
 async function run() {

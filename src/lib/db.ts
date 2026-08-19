@@ -1,23 +1,37 @@
-import { createClient } from '@insforge/sdk';
-import { refreshPersistentSession } from './authSession';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const insforge = createClient({
-  baseUrl: import.meta.env.VITE_INSFORGE_URL,
-  anonKey: import.meta.env.VITE_INSFORGE_ANON_KEY,
-  retryCount: 2,
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+if (!supabaseUrl || !supabasePublishableKey) {
+  throw new Error('VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required');
+}
+
+/**
+ * One browser client owns auth, refresh-token rotation, database, storage and
+ * realtime. Supabase keeps the refresh token across browser restarts and
+ * refreshes access tokens until the user explicitly signs out.
+ */
+export const supabaseClient = createClient(supabaseUrl, supabasePublishableKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: 'splitmate-supabase-auth',
+  },
 });
 
-export function setAuthToken(token: string | null) {
-  insforge.setAccessToken(token);
-}
-
-export function setLegacyRefreshToken(token: string | null) {
-  insforge.getHttpClient().setRefreshToken(token);
-}
+/** PostgREST compatibility facade for the existing calculation service layer. */
+const backend = {
+  database: supabaseClient,
+  auth: supabaseClient.auth,
+  storage: supabaseClient.storage,
+  realtime: supabaseClient.realtime,
+};
 
 interface QueryResult<T = unknown> {
-  data?: T;
-  error?: unknown;
+  data: T | null;
+  error: unknown;
 }
 
 type QueryBuilder = {
@@ -29,30 +43,25 @@ type QueryBuilder = {
   in: (key: string, val: string[]) => QueryBuilder;
 };
 
-async function executeWithRetry<T = unknown>(queryFn: () => Promise<QueryResult<T>>): Promise<T | undefined> {
+async function executeWithRetry<T = unknown>(queryFn: () => PromiseLike<QueryResult<T>>): Promise<T | undefined> {
   let result = await queryFn();
 
   if (result.error) {
-    const errStr = JSON.stringify(result.error);
-    // The stable SDK refreshes automatically. This fallback routes refreshes
-    // through our same-origin auth proxy for browsers that block third-party cookies.
-    if (errStr.includes('JWT expired') || errStr.includes('PGRST301') || errStr.includes('AUTH_UNAUTHORIZED') || errStr.includes('401')) {
-      const refreshResult = await refreshPersistentSession();
-      if (refreshResult.status !== 'refreshed') {
-        throw new Error('Your login is saved. Reconnect to refresh this data.');
-      }
-      setAuthToken(refreshResult.accessToken);
-      result = await queryFn();
+    const errorText = JSON.stringify(result.error);
+    if (/JWT expired|PGRST301|401|refresh_token/i.test(errorText)) {
+      const { error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (!refreshError) result = await queryFn();
     }
   }
 
-  // Check if error still persists after retry
   if (result.error) {
-    const finalErrStr = JSON.stringify(result.error);
-    throw new Error(finalErrStr || 'Database error occurred');
+    const message = typeof result.error === 'object' && result.error && 'message' in result.error
+      ? String(result.error.message)
+      : JSON.stringify(result.error);
+    throw new Error(message || 'Database error occurred');
   }
 
-  return result.data;
+  return result.data ?? undefined;
 }
 
 function parseParams(params: string) {
@@ -85,13 +94,13 @@ function parseParams(params: string) {
 
 function applyFilters<T extends QueryBuilder>(query: T, filters: { key: string; op: string; val: string }[]): T {
   let filtered: QueryBuilder = query;
-  for (const f of filters) {
-    if (f.op === 'eq') filtered = filtered.eq(f.key, f.val);
-    if (f.op === 'neq') filtered = filtered.neq(f.key, f.val);
-    if (f.op === 'gt') filtered = filtered.gt(f.key, f.val);
-    if (f.op === 'lt') filtered = filtered.lt(f.key, f.val);
-    if (f.op === 'like') filtered = filtered.like(f.key, f.val);
-    if (f.op === 'in') filtered = filtered.in(f.key, f.val.replace(/^\(|\)$/g, '').split(','));
+  for (const filter of filters) {
+    if (filter.op === 'eq') filtered = filtered.eq(filter.key, filter.val);
+    if (filter.op === 'neq') filtered = filtered.neq(filter.key, filter.val);
+    if (filter.op === 'gt') filtered = filtered.gt(filter.key, filter.val);
+    if (filter.op === 'lt') filtered = filtered.lt(filter.key, filter.val);
+    if (filter.op === 'like') filtered = filtered.like(filter.key, filter.val);
+    if (filter.op === 'in') filtered = filtered.in(filter.key, filter.val.replace(/^\(|\)$/g, '').split(','));
   }
   return filtered as T;
 }
@@ -99,24 +108,22 @@ function applyFilters<T extends QueryBuilder>(query: T, filters: { key: string; 
 export async function dbQuery(table: string, params = '') {
   return executeWithRetry(async () => {
     const { filters, selectVal, orderCol, orderAsc } = parseParams(params);
-    let query = insforge.database.from(table).select(selectVal);
-    query = applyFilters(query, filters);
+    let query = supabaseClient.from(table).select(selectVal);
+    query = applyFilters(query as unknown as QueryBuilder, filters) as unknown as typeof query;
     if (orderCol) query = query.order(orderCol, { ascending: orderAsc });
     return await query;
   });
 }
 
 export async function dbInsert(table: string, body: object) {
-  return executeWithRetry(async () => {
-    return await insforge.database.from(table).insert([body]).select('*');
-  });
+  return executeWithRetry(async () => supabaseClient.from(table).insert(body).select('*'));
 }
 
 export async function dbUpdate(table: string, params: string, body: object) {
   return executeWithRetry(async () => {
     const { filters, selectVal } = parseParams(params);
-    let query = insforge.database.from(table).update(body);
-    query = applyFilters(query, filters);
+    let query = supabaseClient.from(table).update(body);
+    query = applyFilters(query as unknown as QueryBuilder, filters) as unknown as typeof query;
     return await query.select(selectVal);
   });
 }
@@ -124,10 +131,11 @@ export async function dbUpdate(table: string, params: string, body: object) {
 export async function dbDelete(table: string, params: string) {
   return executeWithRetry(async () => {
     const { filters } = parseParams(params);
-    let query = insforge.database.from(table).delete();
-    query = applyFilters(query, filters);
+    let query = supabaseClient.from(table).delete();
+    query = applyFilters(query as unknown as QueryBuilder, filters) as unknown as typeof query;
     return await query;
   });
 }
 
-export default insforge;
+export type { SupabaseClient };
+export default backend;

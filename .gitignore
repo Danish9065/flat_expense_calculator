@@ -30,3 +30,22 @@ dist-ssr
 
 # Custom ignored files
 asad_calculation.*
+
+# Private backend recovery artifacts (database dumps, storage exports, manifests)
+.recovery/
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+.vercel

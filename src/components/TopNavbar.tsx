@@ -4,6 +4,7 @@ import { dbQuery } from '../lib/db';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, LogOut, Receipt } from 'lucide-react';
 import ActivityDrawer from './ActivityDrawer';
+import SecureStorageImage from './SecureStorageImage';
 
 export default function TopNavbar() {
     const { user, role, signOut } = useAuth();
@@ -111,7 +112,7 @@ export default function TopNavbar() {
                                         </span>
                                 </div>
                                 {user.avatar_url ? (
-                                    <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-full ml-2 border-2 border-white/10 shadow-sm object-cover" />
+                                    <SecureStorageImage source={user.avatar_url} alt="" className="w-9 h-9 rounded-full ml-2 border-2 border-white/10 shadow-sm object-cover" />
                                 ) : (
                                     <div className="w-9 h-9 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold ml-2 border-2 border-white/10 shadow-sm">
                                         {fallbackInitial}

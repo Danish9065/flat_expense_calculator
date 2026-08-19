@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { X, Receipt, Loader2, Repeat } from 'lucide-react';
-import insforge from '../lib/db';
 import { ExpenseService } from '../services/expenseService';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
@@ -8,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 import imageCompression from 'browser-image-compression';
 import { dbQuery } from '../lib/db';
 import { CATEGORIES } from '../constants/categories';
+import { safeStorageFileName, uploadPrivateFile } from '../lib/storage';
 
 interface ExpenseModalProps {
     isOpen: boolean;
@@ -97,12 +97,8 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                     const compressedFile = await imageCompression(receiptFile, options);
 
                     setLoadingState('uploading');
-                    const { data, error: uploadErr } = await insforge.storage
-                        .from('receipts')
-                        .uploadAuto(compressedFile);
-
-                    if (uploadErr) throw new Error('Failed to upload receipt');
-                    if (data?.url) receiptUrl = data.url;
+                    const objectPath = `${groupId}/${user.id}/${crypto.randomUUID()}-${safeStorageFileName(compressedFile.name)}`;
+                    receiptUrl = await uploadPrivateFile('receipts', objectPath, compressedFile);
                 } catch (compressError) {
                     console.error('Error compressing image:', compressError);
                     throw new Error('Failed to compress receipt image');

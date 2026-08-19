@@ -9,6 +9,7 @@ import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 import PaymentActions from '../components/PaymentActions';
+import SecureStorageImage from '../components/SecureStorageImage';
 
 const CalculationReport = lazy(() => import('../components/CalculationReport'));
 
@@ -443,12 +444,12 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                 <div className="flex items-center justify-between">
                                     {/* Avatars & Owes arrow */}
                                     <div className="flex items-center space-x-3 flex-1 min-w-0">
-                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
+                                        <SecureStorageImage source={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                         <div className="flex flex-col items-center px-2">
                                             <span className="text-[10px] text-muted-foreground font-medium tracking-wider uppercase mb-1">Owes</span>
                                             <ArrowRight className="w-4 h-4 text-white/25" />
                                         </div>
-                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
+                                        <SecureStorageImage source={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                     </div>
 
                                     <div className="flex items-center space-x-4 pl-4 border-l border-[#1E1E1E] ml-2">
@@ -543,12 +544,12 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
                                     {/* Avatars & Names */}
                                     <div className="flex items-center space-x-3 flex-1 min-w-0">
-                                        <img src={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
+                                        <SecureStorageImage source={getMemberAvatar(s.from)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                         <div className="flex flex-col items-center px-2">
                                             <span className="text-[10px] text-muted-foreground font-medium tracking-wider uppercase mb-1">Owes</span>
                                             <ArrowRight className="w-4 h-4 text-white/25" />
                                         </div>
-                                        <img src={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
+                                        <SecureStorageImage source={getMemberAvatar(s.to)} alt="" className="w-10 h-10 rounded-full bg-white/10 object-cover" />
                                     </div>
 
                                     <div className="flex items-center space-x-4 pl-4 border-l border-[#1E1E1E] ml-2">

@@ -158,7 +158,7 @@ export default function Admin() {
                 setRemoveWarning(`Are you sure you want to remove ${u.full_name} from this group? Their past expenses will remain but they will lose access.`);
             }
             setUserToRemove(u);
-        } catch (err) {
+        } catch {
             showError('Failed to check balances');
         }
     };

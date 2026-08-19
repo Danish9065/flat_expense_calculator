@@ -53,30 +53,32 @@ export default function Signup() {
         if (!isFormValid) return;
         setLoading(true);
         try {
-            const { data: keyData, error: keyError } = await insforge.database
-                .from('invite_keys').select('*')
-                .eq('key_code', inviteKey).eq('is_used', false).maybeSingle();
+            const normalizedInviteKey = inviteKey.trim().toUpperCase();
+            const { data: keyIsValid, error: keyError } = await insforge.database.rpc('validate_invite_key', {
+                key_code_param: normalizedInviteKey,
+            });
 
-            console.log('KEY DEBUG FULL:', JSON.stringify({ keyData, keyError }));
-            console.log('KEY DEBUG RAW inviteKey:', inviteKey);
-            if (keyError || !keyData) throw new Error('Invalid or already used invite key');
-            if (keyData.expires_at && new Date(keyData.expires_at) < new Date()) throw new Error('Invite key has expired');
+            if (keyError || keyIsValid !== true) throw new Error('Invalid or already used invite key');
 
-            const { error: authError } = await insforge.auth.signUp({ email, password });
+            const { error: authError } = await insforge.auth.signUp({
+                email,
+                password,
+                options: {
+                    emailRedirectTo: `${window.location.origin}/auth/callback`,
+                    data: {
+                        full_name: fullName.trim(),
+                        invite_key: normalizedInviteKey,
+                        whatsapp_number: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
+                        upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
+                    },
+                },
+            });
 
-            const alreadyExists = authError?.message?.toLowerCase().includes('already');
-            if (authError && !alreadyExists) throw new Error(authError.message || 'Failed to sign up');
+            if (authError) throw new Error(authError.message || 'Failed to sign up');
 
-            success('OTP sent! Please verify your email.');
-            // Send email, full name, and invite key to the OTP verification screen
+            success('Verification link sent! Please check your email.');
             navigate('/verify-otp', {
-                state: {
-                    email,
-                    fullName,
-                    inviteKey: keyData.key_code,
-                    whatsappNumber: whatsappNumber.trim() ? normalizeWhatsAppNumber(whatsappNumber) : null,
-                    upiId: upiId.trim() ? normalizeUpiId(upiId) : null,
-                }
+                state: { email }
             });
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');

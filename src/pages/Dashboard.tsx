@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import insforge from '../lib/db';
 import { dbQuery, dbDelete } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
@@ -11,6 +10,8 @@ import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/ConfirmModal';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+import SecureStorageLink from '../components/SecureStorageLink';
+import { deleteStorageReference } from '../lib/storage';
 
 interface ExpenseSplitRow {
     user_id: string;
@@ -132,17 +133,7 @@ export default function Dashboard() {
             const deletingExpense = expenses.find((e) => e.id === expenseToDelete);
 
             if (deletingExpense?.receipt_url) {
-                // The URL is usually structured as: .../storage/v1/object/public/receipts/{filename}
-                // We need to extract just the {filename} string
-                const urlParts = deletingExpense.receipt_url.split('/');
-                const fileName = decodeURIComponent(urlParts[urlParts.length - 1]);
-
-                if (fileName) {
-                    await insforge.storage
-                        .from('receipts')
-                        // @ts-expect-error - SDK remove expects its own file-path type but accepts a path array at runtime
-                        .remove([fileName] as unknown as string);
-                }
+                await deleteStorageReference(deletingExpense.receipt_url);
             }
 
             await dbDelete('expenses', `id=eq.${expenseToDelete}`);
@@ -394,9 +385,7 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                         {expense.receipt_url && (
                             <div className="mb-3">
                                 <p className="app-label mb-1">Bill / Receipt</p>
-                                <a href={expense.receipt_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-sm text-primary hover:underline flex items-center w-fit">
-                                    View Attachment <ArrowUpRight className="w-3 h-3 ml-1" />
-                                </a>
+                                <SecureStorageLink reference={expense.receipt_url} />
                             </div>
                         )}
 
