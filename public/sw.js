@@ -1,66 +1,88 @@
-const CACHE_NAME = 'splitmate-cache-v3';
+const CACHE_PREFIX = 'splitmate-app-cache-';
+const CACHE_NAME = `${CACHE_PREFIX}v4`;
+const APP_SHELL = '/index.html';
 
-self.addEventListener('install', (e) => {
-    self.skipWaiting(); // Force the waiting service worker to become the active service worker.
-    e.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll([
-            '/',
-            '/index.html',
-        ]))
-    );
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.add(new Request(APP_SHELL, { cache: 'reload' })))
+      .then(() => self.skipWaiting()),
+  );
 });
 
-self.addEventListener('activate', (e) => {
-    // Clean up old caches
-    e.waitUntil(
-        caches.keys().then((keyList) => {
-            return Promise.all(keyList.map((key) => {
-                if (key !== CACHE_NAME) {
-                    return caches.delete(key);
-                }
-            }));
-        })
-    );
-    self.clients.claim();
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    Promise.all([
+      caches.keys().then((keys) => Promise.all(
+        keys
+          .filter((key) => (key.startsWith(CACHE_PREFIX) || key.startsWith('splitmate-cache-')) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key)),
+      )),
+      self.clients.claim(),
+    ]),
+  );
 });
 
-self.addEventListener('fetch', (e) => {
-    // Only cache GET requests
-    if (e.request.method !== 'GET') return;
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
+});
 
-    // Exclude API calls or InsForge URLs from cache to ensure fresh data
-    const url = new URL(e.request.url);
-    if (url.hostname.includes('insforge') || url.pathname.startsWith('/api')) {
-        return;
-    }
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
 
-    // Network-first strategy for HTML pages (avoid aggressive caching)
-    if (e.request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html') {
-        e.respondWith(
-            fetch(e.request)
-                .then((response) => {
-                    const responseClone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(e.request, responseClone);
-                    });
-                    return response;
-                })
-                .catch(() => caches.match(e.request))
-        );
-        return;
-    }
+  const url = new URL(request.url);
 
-    // Cache first, network fallback for assets (JS, CSS, Images)
-    e.respondWith(
-        caches.match(e.request).then((cachedResponse) => {
-            if (cachedResponse) return cachedResponse;
-            return fetch(e.request).then((networkResponse) => {
-                const responseClone = networkResponse.clone();
-                caches.open(CACHE_NAME).then((cache) => {
-                    cache.put(e.request, responseClone);
-                });
-                return networkResponse;
-            });
+  // Never intercept Supabase, authentication, storage, third-party, or API
+  // traffic. Application data must always come from the network and RLS.
+  if (url.origin !== self.location.origin
+    || url.pathname.startsWith('/api/')
+    || url.pathname === '/sw.js'
+    || url.pathname === '/version.json') return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then(async (response) => {
+          if (response.ok) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(APP_SHELL, response.clone());
+          }
+          return response;
         })
+        .catch(async () => (await caches.match(APP_SHELL)) || Response.error()),
     );
+    return;
+  }
+
+  // Vite assets are content-hashed, so a cached URL always represents the
+  // exact build that requested it. New releases use new asset URLs.
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(request).then(async (cached) => {
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, response.clone());
+        }
+        return response;
+      }),
+    );
+    return;
+  }
+
+  // Icons and the manifest prefer the latest network version, with an offline
+  // fallback. No database or user response reaches this cache.
+  event.respondWith(
+    fetch(request)
+      .then(async (response) => {
+        if (response.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, response.clone());
+        }
+        return response;
+      })
+      .catch(async () => (await caches.match(request)) || Response.error()),
+  );
 });
