@@ -2,6 +2,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { dbQuery } from '../lib/db';
+import { GROUP_DATA_CHANGED_EVENT, PROFILE_CHANGED_EVENT } from '../lib/appEvents';
 import { useAuth } from './AuthContext';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,11 +116,24 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   }, [user, authLoading]);
 
   useEffect(() => {
-    const refreshPaymentProfiles = () => {
+    const refreshMemberProfiles = () => {
       if (activeGroupId) void fetchMembers(activeGroupId);
     };
-    window.addEventListener('splitmate:payment-profile-changed', refreshPaymentProfiles);
-    return () => window.removeEventListener('splitmate:payment-profile-changed', refreshPaymentProfiles);
+    const refreshVisibleProfiles = () => {
+      if (document.visibilityState === 'visible') refreshMemberProfiles();
+    };
+    const timer = window.setInterval(refreshVisibleProfiles, 10_000);
+    window.addEventListener(PROFILE_CHANGED_EVENT, refreshMemberProfiles);
+    window.addEventListener(GROUP_DATA_CHANGED_EVENT, refreshMemberProfiles);
+    window.addEventListener('focus', refreshMemberProfiles);
+    document.addEventListener('visibilitychange', refreshVisibleProfiles);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener(PROFILE_CHANGED_EVENT, refreshMemberProfiles);
+      window.removeEventListener(GROUP_DATA_CHANGED_EVENT, refreshMemberProfiles);
+      window.removeEventListener('focus', refreshMemberProfiles);
+      document.removeEventListener('visibilitychange', refreshVisibleProfiles);
+    };
   }, [activeGroupId]);
 
   // Derived state for the currently active group for backwards compatibility

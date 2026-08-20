@@ -185,10 +185,9 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             }
             setSettlingCard(null);
             setPartialAmount('');
-            // Fix 2: optimistic re-fetch already happened — now notify others
-            if (groupId) await notifyGroupDataChanged(groupId);
             window.dispatchEvent(new CustomEvent('settle-complete'));
-            await fetchBalanceData();
+            await fetchBalanceData(true);
+            if (groupId) void notifyGroupDataChanged(groupId);
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'Failed to settle up');
         } finally {

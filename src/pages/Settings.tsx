@@ -9,6 +9,7 @@ import { deleteStorageReference, safeStorageFileName, uploadPrivateFile } from '
 import CountryCodeSelect from '../components/CountryCodeSelect';
 import SecureStorageImage from '../components/SecureStorageImage';
 import imageCompression from 'browser-image-compression';
+import { PROFILE_CHANGED_EVENT, type ProfileChangedDetail } from '../lib/appEvents';
 import {
     buildInternationalWhatsAppNumber,
     formatInternationalPhone,
@@ -82,6 +83,14 @@ export default function Settings() {
     const handleUpdateProfile = async (e: FormEvent) => {
         e.preventDefault();
         if (!user) return;
+
+        if (paymentDetailsEditing) {
+            const validationError = validatePaymentDetails();
+            if (validationError) {
+                showError(validationError);
+                return;
+            }
+        }
         setProfileLoading(true);
 
         let uploadedAvatarReference: string | null = null;
@@ -115,18 +124,14 @@ export default function Settings() {
                 });
             }
 
-            // Optionally update auth user meta data as well
-            try {
-                await insforge.auth.updateUser({
-                    data: { full_name: fullName, avatar_url: finalAvatarUrl }
-                });
-            } catch (err) {
-                console.log('Skipping legacy auth profile save', err);
-            }
+            if (paymentDetailsEditing) await persistPaymentDetails();
 
             await refreshProfile();
+            window.dispatchEvent(new CustomEvent<ProfileChangedDetail>(PROFILE_CHANGED_EVENT, {
+                detail: { userId: user.id },
+            }));
 
-            success('Profile updated successfully!');
+            success('Your profile and payment details are saved.');
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             if (uploadedAvatarReference && !avatarWasPersisted) {
@@ -138,50 +143,71 @@ export default function Settings() {
         }
     };
 
-    const savePaymentDetails = async () => {
-        if (!user) return;
+    const getNormalizedPaymentDetails = () => ({
+        whatsapp_number: whatsappNumber.trim()
+            ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
+            : null,
+        upi_id: upiId.trim() ? normalizeUpiId(upiId) : null,
+    });
+
+    const validatePaymentDetails = () => {
         const normalizedWhatsAppNumber = whatsappNumber.trim()
             ? buildInternationalWhatsAppNumber(countryIso, whatsappNumber)
             : null;
-        const normalizedUpiId = upiId.trim() ? normalizeUpiId(upiId) : null;
         if (whatsappNumber.trim() && !normalizedWhatsAppNumber) {
-            showError(countryIso === 'IN'
+            return countryIso === 'IN'
                 ? 'Enter a valid 10-digit Indian mobile number beginning with 6, 7, 8, or 9.'
-                : 'Enter a valid mobile number without a leading zero.');
-            return;
+                : 'Enter a valid mobile number without a leading zero.';
         }
         if (upiId.trim() && !isValidUpiId(upiId)) {
-            showError('Enter a valid UPI ID such as yourname@bank.');
-            return;
+            return 'Enter a valid UPI ID such as yourname@bank.';
         }
+        return null;
+    };
 
-        setPaymentProfileSaving(true);
-        try {
-            const { data, error } = await insforge.database
+    const persistPaymentDetails = async () => {
+        if (!user) throw new Error('Authentication required');
+        const { whatsapp_number, upi_id } = getNormalizedPaymentDetails();
+
+        const { data, error } = await insforge.database
                 .from('user_payment_profiles')
                 .upsert({
                     user_id: user.id,
-                    whatsapp_number: normalizedWhatsAppNumber,
-                    upi_id: normalizedUpiId,
+                    whatsapp_number,
+                    upi_id,
                     updated_at: new Date().toISOString(),
                 }, { onConflict: 'user_id' })
                 .select('whatsapp_number,upi_id')
                 .single();
-            if (error) throw new Error(error.message || 'Failed to save payment details');
+        if (error) throw new Error(error.message || 'Failed to save payment details');
 
-            const persistedProfile = data as PaymentProfileRow;
-            if ((persistedProfile.upi_id || null) !== normalizedUpiId
-                || (persistedProfile.whatsapp_number || null) !== normalizedWhatsAppNumber) {
-                throw new Error('The saved payment details could not be verified. Please try again.');
-            }
+        const persistedProfile = data as PaymentProfileRow;
+        if ((persistedProfile.upi_id || null) !== upi_id
+            || (persistedProfile.whatsapp_number || null) !== whatsapp_number) {
+            throw new Error('The saved payment details could not be verified. Please try again.');
+        }
 
-            const parsedPhone = splitInternationalWhatsAppNumber(persistedProfile.whatsapp_number);
-            setCountryIso(parsedPhone.countryIso);
-            setWhatsappNumber(parsedPhone.localNumber);
-            setUpiId(persistedProfile.upi_id || '');
-            setSavedPaymentProfile(persistedProfile);
-            setPaymentDetailsEditing(false);
-            window.dispatchEvent(new CustomEvent('splitmate:payment-profile-changed'));
+        const parsedPhone = splitInternationalWhatsAppNumber(persistedProfile.whatsapp_number);
+        setCountryIso(parsedPhone.countryIso);
+        setWhatsappNumber(parsedPhone.localNumber);
+        setUpiId(persistedProfile.upi_id || '');
+        setSavedPaymentProfile(persistedProfile);
+        setPaymentDetailsEditing(false);
+        window.dispatchEvent(new CustomEvent<ProfileChangedDetail>(PROFILE_CHANGED_EVENT, {
+            detail: { userId: user.id },
+        }));
+        return persistedProfile;
+    };
+
+    const savePaymentDetails = async () => {
+        const validationError = validatePaymentDetails();
+        if (validationError) {
+            showError(validationError);
+            return;
+        }
+        setPaymentProfileSaving(true);
+        try {
+            await persistPaymentDetails();
             success('Payment details saved successfully!');
         } catch (error) {
             showError(error instanceof Error ? error.message : 'Failed to save payment details');
@@ -352,7 +378,7 @@ export default function Settings() {
                                 <button
                                     type="button"
                                     onClick={() => void savePaymentDetails()}
-                                    disabled={paymentProfileSaving}
+                                    disabled={paymentProfileSaving || profileLoading}
                                     className="accent-button inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold"
                                 >
                                     {paymentProfileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -370,12 +396,13 @@ export default function Settings() {
                     <div className="pt-2">
                         <button
                             type="submit"
-                            disabled={profileLoading}
+                            disabled={profileLoading || paymentProfileSaving}
                             className="accent-button w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary focus:ring-offset-background"
                         >
                             {profileLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                             Save Profile
                         </button>
+                        <p className="mt-2 text-center text-[11px] text-muted-foreground">Saves your name, photo, currency, and any WhatsApp or UPI details currently being edited.</p>
                     </div>
                 </form>
             </div>

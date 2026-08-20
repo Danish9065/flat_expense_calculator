@@ -139,9 +139,8 @@ export default function Dashboard() {
 
             await dbDelete('expenses', `id=eq.${expenseToDelete}`);
             success('Expense deleted');
-            // Notify other group members about the change
-            if (groupId) await notifyGroupDataChanged(groupId);
-            await fetchInitialData();
+            await fetchInitialData(true);
+            if (groupId) void notifyGroupDataChanged(groupId);
         } catch {
             showError('Failed to delete expense');
         } finally {
@@ -330,8 +329,8 @@ export default function Dashboard() {
                     groupId={groupId}
                     editingExpense={editingExpense}
                     onSuccess={async () => {
-                        await fetchInitialData();
-                        if (groupId) await notifyGroupDataChanged(groupId);
+                        await fetchInitialData(true);
+                        if (groupId) void notifyGroupDataChanged(groupId);
                     }}
                 />
             )}

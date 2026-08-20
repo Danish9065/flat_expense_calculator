@@ -104,11 +104,13 @@ export default function PaymentCenter() {
     setRecordingKey(payment.key);
     try {
       await SettlementService.settleMultiple(payment.allocations);
-      await Promise.all(Array.from(new Set(payment.allocations.map((allocation) => allocation.groupId))).map(notifyGroupDataChanged));
       window.dispatchEvent(new CustomEvent('settle-complete'));
       success(`Recorded ₹${payment.total.toFixed(2)} across ${payment.allocations.length} group${payment.allocations.length === 1 ? '' : 's'}.`);
       setConfirmingKey(null);
       await loadAllPayments(true);
+      for (const groupId of new Set(payment.allocations.map((allocation) => allocation.groupId))) {
+        void notifyGroupDataChanged(groupId);
+      }
     } catch (error) {
       showError(error instanceof Error ? error.message : 'Could not record the combined payment');
     } finally {

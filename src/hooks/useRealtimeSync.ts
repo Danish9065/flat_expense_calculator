@@ -1,13 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { supabaseClient } from '../lib/db';
+import { GROUP_DATA_CHANGED_EVENT, type GroupDataChangedDetail } from '../lib/appEvents';
 
-const LOCAL_GROUP_CHANGE_EVENT = 'splitmate:group-data-changed';
-const FALLBACK_SYNC_INTERVAL_MS = 15_000;
+const FALLBACK_SYNC_INTERVAL_MS = 5_000;
 const CHANGE_DEBOUNCE_MS = 350;
-
-interface GroupChangeDetail {
-  groupId: string;
-}
+const GROUP_CHANGE_CHANNEL = 'splitmate-group-data';
 
 function useRealtimeGroupCollection(
   groupIds: string[],
@@ -38,7 +35,7 @@ function useRealtimeGroupCollection(
     };
 
     const handleLocalEvent = (event: Event) => {
-      const detail = (event as CustomEvent<GroupChangeDetail>).detail;
+      const detail = (event as CustomEvent<GroupDataChangedDetail>).detail;
       if (detail?.groupId && normalizedGroupIds.includes(detail.groupId)) handleEvent();
     };
 
@@ -69,17 +66,10 @@ function useRealtimeGroupCollection(
           .subscribe((status, channelError) => {
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
               console.warn(`[Realtime] All-groups channel ${status.toLowerCase()}`, channelError);
+              handleEvent();
             }
           });
         channels.push(databaseChannel);
-
-        for (const groupId of normalizedGroupIds) {
-          const broadcastChannel = supabaseClient
-            .channel(`group-data:${groupId}`)
-            .on('broadcast', { event: 'data-changed' }, handleEvent)
-            .subscribe();
-          channels.push(broadcastChannel);
-        }
       } else {
         const groupId = normalizedGroupIds[0];
         const filter = `group_id=eq.${groupId}`;
@@ -94,6 +84,7 @@ function useRealtimeGroupCollection(
           .subscribe((status, channelError) => {
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
               console.warn(`[Realtime] Group channel ${status.toLowerCase()}`, channelError);
+              handleEvent();
             }
           });
         channels.push(groupChannel);
@@ -105,7 +96,13 @@ function useRealtimeGroupCollection(
       if (session?.access_token) void supabaseClient.realtime.setAuth(session.access_token);
     });
     const fallbackTimer = window.setInterval(refreshWhenActive, FALLBACK_SYNC_INTERVAL_MS);
-    window.addEventListener(LOCAL_GROUP_CHANGE_EVENT, handleLocalEvent);
+    const browserChannel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(GROUP_CHANGE_CHANNEL);
+    if (browserChannel) {
+      browserChannel.onmessage = (event: MessageEvent<GroupDataChangedDetail>) => {
+        if (event.data?.groupId && normalizedGroupIds.includes(event.data.groupId)) handleEvent();
+      };
+    }
+    window.addEventListener(GROUP_DATA_CHANGED_EVENT, handleLocalEvent);
     window.addEventListener('focus', refreshWhenActive);
     window.addEventListener('online', refreshWhenActive);
     document.addEventListener('visibilitychange', refreshWhenActive);
@@ -115,7 +112,8 @@ function useRealtimeGroupCollection(
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       window.clearInterval(fallbackTimer);
       authListener.subscription.unsubscribe();
-      window.removeEventListener(LOCAL_GROUP_CHANGE_EVENT, handleLocalEvent);
+      browserChannel?.close();
+      window.removeEventListener(GROUP_DATA_CHANGED_EVENT, handleLocalEvent);
       window.removeEventListener('focus', refreshWhenActive);
       window.removeEventListener('online', refreshWhenActive);
       document.removeEventListener('visibilitychange', refreshWhenActive);
@@ -139,9 +137,14 @@ export async function notifyGroupDataChanged(groupId: string) {
 
   // Update every listener in this browser immediately, independently of the
   // network socket. Other devices receive the broadcast below.
-  window.dispatchEvent(new CustomEvent<GroupChangeDetail>(LOCAL_GROUP_CHANGE_EVENT, {
+  window.dispatchEvent(new CustomEvent<GroupDataChangedDetail>(GROUP_DATA_CHANGED_EVENT, {
     detail: { groupId },
   }));
+  if (typeof BroadcastChannel !== 'undefined') {
+    const browserChannel = new BroadcastChannel(GROUP_CHANGE_CHANNEL);
+    browserChannel.postMessage({ groupId } satisfies GroupDataChangedDetail);
+    browserChannel.close();
+  }
 
   const { data, error } = await supabaseClient.auth.getSession();
   if (error) {
