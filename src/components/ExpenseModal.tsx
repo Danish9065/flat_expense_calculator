@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Receipt, Loader2, Repeat } from 'lucide-react';
 import { ExpenseService } from '../services/expenseService';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +18,46 @@ interface ExpenseModalProps {
     onSuccess?: () => void | Promise<void>;
 }
 
+interface ExpenseDraft {
+    version: 1;
+    amount: string;
+    description: string;
+    category: string;
+    note: string;
+    splitBetween: string[];
+    isRecurring: boolean;
+    recurType: 'weekly' | 'monthly';
+}
+
+function readExpenseDraft(key: string): ExpenseDraft | null {
+    try {
+        const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<ExpenseDraft> | null;
+        if (!value || value.version !== 1 || typeof value.amount !== 'string' || typeof value.description !== 'string') return null;
+        return {
+            version: 1,
+            amount: value.amount,
+            description: value.description,
+            category: typeof value.category === 'string' ? value.category : 'General',
+            note: typeof value.note === 'string' ? value.note : '',
+            splitBetween: Array.isArray(value.splitBetween)
+                ? value.splitBetween.filter((id): id is string => typeof id === 'string')
+                : [],
+            isRecurring: value.isRecurring === true,
+            recurType: value.recurType === 'weekly' ? 'weekly' : 'monthly',
+        };
+    } catch {
+        return null;
+    }
+}
+
+function removeExpenseDraft(key: string) {
+    try {
+        sessionStorage.removeItem(key);
+    } catch {
+        // Browser storage can be unavailable in restricted/private contexts.
+    }
+}
+
 
 
 export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense, onSuccess }: ExpenseModalProps) {
@@ -35,6 +75,10 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurType, setRecurType] = useState<'weekly' | 'monthly'>('monthly');
     const [loadingState, setLoadingState] = useState<'idle' | 'compressing' | 'uploading' | 'saving'>('idle');
+    const [initializedDraftKey, setInitializedDraftKey] = useState('');
+    const initializedDraftKeyRef = useRef('');
+    const splitTouchedRef = useRef(false);
+    const draftKey = user ? `splitmate:expense-draft:${user.id}:${groupId}:${editingExpense?.id || 'new'}` : '';
 
     useEffect(() => {
         if (!receiptFile) {
@@ -47,45 +91,90 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     }, [receiptFile]);
 
     useEffect(() => {
-        if (isOpen) {
-            if (editingExpense) {
-                setAmount(editingExpense.amount.toString());
-                setDescription(editingExpense.item_name);
-                setCategory(editingExpense.category || 'General');
-                setNote(editingExpense.note || '');
-                setIsRecurring(editingExpense.is_recurring || false);
-                setRecurType(editingExpense.recur_type || 'monthly');
-                setReceiptFile(null);
-
-                // Fetch splits for this expense to populate checkboxes
-                const fetchSplits = async () => {
-                    try {
-                        const splits = await dbQuery('expense_splits', `expense_id=eq.${editingExpense.id}&select=user_id`);
-                        if (splits && splits.length > 0) {
-                            setSplitBetween((splits as unknown as { user_id: string }[]).map((s) => s.user_id));
-                        } else {
-                            // Fallback to all members if none found
-                            setSplitBetween(members.map((m: { user_id: string }) => m.user_id));
-                        }
-                    } catch {
-                        setSplitBetween(members.map((m: { user_id: string }) => m.user_id));
-                    }
-                };
-                fetchSplits();
-            } else {
-                setAmount('');
-                setDescription('');
-                setCategory('General');
-                setNote('');
-                setReceiptFile(null);
-                setIsRecurring(false);
-                setRecurType('monthly');
-                setSplitBetween(members.map((m: { user_id: string }) => m.user_id));
-            }
+        if (!isOpen || !draftKey) {
+            initializedDraftKeyRef.current = '';
+            setInitializedDraftKey('');
+            return;
         }
-    }, [editingExpense, isOpen, members]);
+        // Realtime/member refreshes create a new members array. Initialize once
+        // per modal opening so those refreshes never overwrite a user's draft.
+        if (initializedDraftKeyRef.current === draftKey) return;
+
+        initializedDraftKeyRef.current = draftKey;
+        splitTouchedRef.current = false;
+        setReceiptFile(null);
+
+        const savedDraft = readExpenseDraft(draftKey);
+        if (savedDraft) {
+            setAmount(savedDraft.amount);
+            setDescription(savedDraft.description);
+            setCategory(savedDraft.category);
+            setNote(savedDraft.note);
+            setSplitBetween(savedDraft.splitBetween);
+            setIsRecurring(savedDraft.isRecurring);
+            setRecurType(savedDraft.recurType);
+            setInitializedDraftKey(draftKey);
+            return;
+        }
+
+        const defaultMemberIds = members.map((member: { user_id: string }) => member.user_id);
+        if (editingExpense) {
+            setAmount(editingExpense.amount.toString());
+            setDescription(editingExpense.item_name);
+            setCategory(editingExpense.category || 'General');
+            setNote(editingExpense.note || '');
+            setIsRecurring(editingExpense.is_recurring || false);
+            setRecurType(editingExpense.recur_type || 'monthly');
+            setSplitBetween(defaultMemberIds);
+            setInitializedDraftKey(draftKey);
+
+            const initializationKey = draftKey;
+            void dbQuery('expense_splits', `expense_id=eq.${editingExpense.id}&select=user_id`)
+                .then((splits) => {
+                    if (initializedDraftKeyRef.current !== initializationKey || splitTouchedRef.current) return;
+                    if (splits?.length) {
+                        setSplitBetween((splits as unknown as { user_id: string }[]).map((split) => split.user_id));
+                    }
+                })
+                .catch(() => undefined);
+        } else {
+            setAmount('');
+            setDescription('');
+            setCategory('General');
+            setNote('');
+            setIsRecurring(false);
+            setRecurType('monthly');
+            setSplitBetween(defaultMemberIds);
+            setInitializedDraftKey(draftKey);
+        }
+    }, [draftKey, editingExpense, isOpen, members]);
+
+    useEffect(() => {
+        if (!isOpen || !draftKey || initializedDraftKey !== draftKey) return;
+        const draft: ExpenseDraft = {
+            version: 1,
+            amount,
+            description,
+            category,
+            note,
+            splitBetween,
+            isRecurring,
+            recurType,
+        };
+        try {
+            sessionStorage.setItem(draftKey, JSON.stringify(draft));
+        } catch {
+            // The in-memory draft remains safe when browser storage is blocked.
+        }
+    }, [amount, category, description, draftKey, initializedDraftKey, isOpen, isRecurring, note, recurType, splitBetween]);
 
     if (!isOpen) return null;
+
+    const clearDraftAndClose = () => {
+        if (loadingState !== 'idle') return;
+        if (draftKey) removeExpenseDraft(draftKey);
+        onClose();
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -142,6 +231,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
             // committed expense and all of its splits. This makes a successful
             // save deterministic even if Realtime is reconnecting.
             await onSuccess?.();
+            if (draftKey) removeExpenseDraft(draftKey);
             onClose();
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
@@ -152,6 +242,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     };
 
     const toggleSplitMember = (userId: string) => {
+        splitTouchedRef.current = true;
         if (splitBetween.includes(userId)) {
             if (splitBetween.length > 1) { // Prevent empty split
                 setSplitBetween(prev => prev.filter(id => id !== userId));
@@ -174,7 +265,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                     <h3 className="text-lg font-bold text-white">
                         {editingExpense ? 'Edit Expense' : 'Add Expense'}
                     </h3>
-                    <button onClick={onClose} className="text-muted-foreground hover:text-white">
+                    <button type="button" onClick={clearDraftAndClose} disabled={loadingState !== 'idle'} aria-label="Close expense form" className="text-muted-foreground hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
