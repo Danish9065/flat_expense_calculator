@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { supabaseClient } from '../lib/db';
 import { GROUP_DATA_CHANGED_EVENT, type GroupDataChangedDetail } from '../lib/appEvents';
 
-const FALLBACK_SYNC_INTERVAL_MS = 5_000;
+// Realtime is the primary path. Polling is only a quiet recovery mechanism for
+// a dropped socket, so it should not continuously churn page data and renders.
+const FALLBACK_SYNC_INTERVAL_MS = 60_000;
 const CHANGE_DEBOUNCE_MS = 350;
 const GROUP_CHANGE_CHANNEL = 'splitmate-group-data';
 

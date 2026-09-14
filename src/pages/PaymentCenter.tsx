@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, CheckCircle2, ChevronDown, Layers3, Loader2, ReceiptText, RefreshCw, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
@@ -34,13 +34,13 @@ export default function PaymentCenter() {
   const [refreshing, setRefreshing] = useState(false);
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const groupList = useMemo(() => (groups || []) as GroupSummary[], [groups]);
 
-  const loadAllPayments = useCallback(async (silent = false) => {
+  const loadAllPayments = useCallback(async () => {
     if (!user || groupLoading) return;
-    if (silent) setRefreshing(true);
-    else setLoading(true);
+    const requestId = ++requestIdRef.current;
 
     try {
       const sources = await Promise.all(groupList.map(async (group): Promise<GroupSettlementSource> => ({
@@ -67,16 +67,28 @@ export default function PaymentCenter() {
         profileMap[row.id] = { ...row, ...paymentByUser.get(row.id) };
       }
 
-      setProfiles(profileMap);
-      setPayments(consolidated);
+      if (requestId === requestIdRef.current) {
+        setProfiles(profileMap);
+        setPayments(consolidated);
+      }
     } catch (error) {
+      if (requestId !== requestIdRef.current) return;
       console.error('Failed to load all-group payments', error);
       showError('Could not load all group payments. Please try again.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [groupList, groupLoading, showError, user]);
+
+  const refreshAllPayments = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadAllPayments();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAllPayments, refreshing]);
 
   useEffect(() => {
     if (view === 'all') void loadAllPayments();
@@ -84,11 +96,11 @@ export default function PaymentCenter() {
 
   useAllGroupsRealtimeSync(
     view === 'all' ? groupList.map((group) => group.id) : [],
-    () => loadAllPayments(true),
+    loadAllPayments,
   );
 
   useEffect(() => {
-    const refresh = () => void loadAllPayments(true);
+    const refresh = () => void loadAllPayments();
     window.addEventListener('settle-complete', refresh);
     return () => window.removeEventListener('settle-complete', refresh);
   }, [loadAllPayments]);
@@ -107,7 +119,7 @@ export default function PaymentCenter() {
       window.dispatchEvent(new CustomEvent('settle-complete'));
       success(`Recorded ₹${payment.total.toFixed(2)} across ${payment.allocations.length} group${payment.allocations.length === 1 ? '' : 's'}.`);
       setConfirmingKey(null);
-      await loadAllPayments(true);
+      await loadAllPayments();
       for (const groupId of new Set(payment.allocations.map((allocation) => allocation.groupId))) {
         void notifyGroupDataChanged(groupId);
       }
@@ -128,7 +140,7 @@ export default function PaymentCenter() {
         </div>
         <button
           type="button"
-          onClick={() => void loadAllPayments(true)}
+          onClick={() => void refreshAllPayments()}
           disabled={refreshing || view !== 'all'}
           className="ghost-button inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold sm:w-auto"
         >
@@ -149,6 +161,15 @@ export default function PaymentCenter() {
         <div className="grid min-h-[50vh] place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
       ) : (
         <>
+          <div role="note" className="mb-6 rounded-2xl border border-amber-300/25 bg-amber-300/[0.07] p-4 text-sm leading-relaxed text-amber-100/90">
+            <strong className="text-white">This is your personal payment view.</strong>{' '}
+            “All groups” only shows payments involving the currently signed-in account, combined across every group you belong to. It is not the complete balance sheet for every member. Open{' '}
+            <button type="button" onClick={() => setView('group')} className="font-bold text-amber-200 underline decoration-amber-200/50 underline-offset-4 hover:text-white">
+              Group details
+            </button>{' '}
+            to see the full calculation and person-by-person payments for the selected group.
+          </div>
+
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="app-panel p-5"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-rose-300"><ArrowUpRight className="h-4 w-4" /> You need to pay</div><p className="mt-3 text-3xl font-black text-white">₹{totals.toPay.toFixed(2)}</p></div>
             <div className="app-panel p-5"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-300"><ArrowDownLeft className="h-4 w-4" /> You will receive</div><p className="mt-3 text-3xl font-black text-white">₹{totals.toReceive.toFixed(2)}</p></div>

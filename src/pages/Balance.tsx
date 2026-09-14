@@ -1,10 +1,10 @@
-import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { dbQuery } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, RefreshCw, FileSearch } from 'lucide-react';
+import { ArrowRight, Loader2, CheckCircle2, Handshake, BarChart3, FileSearch } from 'lucide-react';
 import { CATEGORY_MAP } from '../constants/categories';
 import { useToast } from '../context/ToastContext';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
@@ -50,7 +50,6 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const { success, error: showError } = useToast();
 
     const [loading, setLoading] = useState(true);
-    const [isRefreshing, setIsRefreshing] = useState(false);
     const [settling, setSettling] = useState<string | null>(null);
     const [category, setCategory] = useState<string>('All');
     // Partial payment state
@@ -64,17 +63,19 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const [settlements, setSettlements] = useState<SettlementRow[]>([]);
     const [minimizedSettlements, setMinimizedSettlements] = useState<SettlementRow[]>([]);
     const [fallbackUsers, setFallbackUsers] = useState<Record<string, { full_name?: string }>>({});
+    const membersRef = useRef<GroupMemberRow[]>(members);
+    const requestIdRef = useRef(0);
 
-    const fetchBalanceData = useCallback(async (silent = false) => {
+    useEffect(() => {
+        membersRef.current = members;
+    }, [members]);
+
+    const fetchBalanceData = useCallback(async () => {
         if (!groupId) { setLoading(false); return; }
-
-        if (silent) {
-            setIsRefreshing(true);
-        } else {
-            setLoading(true);
-        }
+        const requestId = ++requestIdRef.current;
 
         try {
+            const currentMembers = membersRef.current;
             setCalculationError('');
             // 1. Chart Data: "Who paid what" total
             let expQuery = `group_id=eq.${groupId}&select=added_by,amount,category`;
@@ -92,17 +93,17 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             }
 
             // 2. Settlement Data: "How to settle up"
-            const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, members, category);
+            const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, currentMembers, category);
             const minimized = SettlementService.calculateMinimizedSettlements(calcSettlements);
 
             // 3. Fallback users for removed members
             const missingIds = new Set<string>();
             Object.keys(userTotals).forEach(id => {
-                if (!members.find(m => m.user_id === id)) missingIds.add(id);
+                if (!currentMembers.find(m => m.user_id === id)) missingIds.add(id);
             });
             calcSettlements.forEach(s => {
-                if (!members.find(m => m.user_id === s.from)) missingIds.add(s.from);
-                if (!members.find(m => m.user_id === s.to)) missingIds.add(s.to);
+                if (!currentMembers.find(m => m.user_id === s.from)) missingIds.add(s.from);
+                if (!currentMembers.find(m => m.user_id === s.to)) missingIds.add(s.to);
             });
 
             const fMap: Record<string, { full_name?: string }> = {};
@@ -111,14 +112,11 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                 const missingUsersData = await dbQuery('users', `id=in.(${idsArray.join(',')})&select=id,full_name`);
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (missingUsersData as any[])?.forEach(u => fMap[u.id] = u);
-                setFallbackUsers(fMap);
-            } else {
-                setFallbackUsers({});
             }
 
-            const allIds = Array.from(new Set([...members.map(m => m.user_id), ...Object.keys(userTotals)]));
+            const allIds = Array.from(new Set([...currentMembers.map(m => m.user_id), ...Object.keys(userTotals)]));
             const cData = allIds.map((id, index) => {
-                const active = members.find(m => m.user_id === id);
+                const active = currentMembers.find(m => m.user_id === id);
                 let name = 'Member';
                 if (active?.users?.full_name) {
                     name = active.users.full_name.split(' ')[0];
@@ -133,29 +131,31 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                 };
             }).filter((d) => d.value > 0);
 
+            if (requestId !== requestIdRef.current) return;
+            setFallbackUsers(fMap);
             setChartData(cData);
             setCategoryTotals(catTotals);
             setSettlements(calcSettlements);
             setMinimizedSettlements(minimized);
 
         } catch (err) {
+            if (requestId !== requestIdRef.current) return;
             console.error('Failed to load balance data', err);
             setSettlements([]);
             setMinimizedSettlements([]);
             setCalculationError(err instanceof Error ? err.message : 'Could not calculate this group balance');
         } finally {
-            setLoading(false);
-            setIsRefreshing(false);
+            if (requestId === requestIdRef.current) setLoading(false);
         }
-    }, [groupId, members, category]);
+    }, [groupId, category]);
 
     // Fix 4: re-fetch on group/category switch
     useEffect(() => {
         fetchBalanceData();
     }, [fetchBalanceData]);
 
-    // Fix 1: InsForge Realtime — silent re-fetch when any group member writes data
-    useRealtimeSync(groupId, () => fetchBalanceData(true));
+    // Realtime updates replace the data in place without remounting the page.
+    useRealtimeSync(groupId, fetchBalanceData);
 
     /**
      * Open the inline partial-payment modal for a given debt pair.
@@ -192,7 +192,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             setSettlingCard(null);
             setPartialAmount('');
             window.dispatchEvent(new CustomEvent('settle-complete'));
-            await fetchBalanceData(true);
+            await fetchBalanceData();
             if (groupId) void notifyGroupDataChanged(groupId);
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'Failed to settle up');
@@ -326,12 +326,6 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                     <FileSearch className="h-4 w-4 text-primary" />
                     Explain this calculation
                 </button>
-                {isRefreshing && (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground animate-pulse sm:absolute sm:right-4 sm:top-24">
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        Updating...
-                    </span>
-                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 app-panel overflow-hidden mb-8">

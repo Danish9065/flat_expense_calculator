@@ -5,6 +5,11 @@ import { dbQuery } from '../lib/db';
 import { GROUP_DATA_CHANGED_EVENT, PROFILE_CHANGED_EVENT } from '../lib/appEvents';
 import { useAuth } from './AuthContext';
 
+interface GroupMemberProfile {
+  user_id: string;
+  users: Record<string, unknown> | null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GroupContext = createContext<any>(null);
 
@@ -92,14 +97,17 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       const paymentsById = new Map((paymentProfiles || []).map((profile: any) => [profile.user_id, profile]));
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const combined = memberRows.map((m: any) => ({
+      const combined: GroupMemberProfile[] = memberRows.map((m: any) => ({
         user_id: m.user_id,
         users: usersById.has(m.user_id)
           ? { ...usersById.get(m.user_id), ...paymentsById.get(m.user_id) }
           : null
-      }));
+      })).sort((a, b) => a.user_id.localeCompare(b.user_id));
 
-      setMembers(combined);
+      // Profile recovery polling often returns identical rows. Preserve the
+      // existing array identity so consumers do not mistake a no-op poll for a
+      // membership change and restart their data-loading effects.
+      setMembers((current) => JSON.stringify(current) === JSON.stringify(combined) ? current : combined);
     } catch (e) { console.error('Failed fetching members', e); }
   };
 
