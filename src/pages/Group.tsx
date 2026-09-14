@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import insforge from '../lib/db';
-import { dbQuery, dbInsert, dbUpdate } from '../lib/db';
+import { dbQuery, dbInsert, dbUpdate, supabaseClient } from '../lib/db';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error
 import { useAuth } from '../context/AuthContext';
@@ -40,7 +39,7 @@ export default function GroupPage() {
             if (!newGroup?.id) throw new Error('Failed to create group');
             // Add admin as member
             try {
-                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
+                await supabaseClient.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
             } catch { /* safe to ignore, user might already exist */ }
 
             await dbInsert('group_members', { group_id: newGroup.id, user_id: user.id });
@@ -61,10 +60,10 @@ export default function GroupPage() {
         try {
             // Ensure user exists in users table first (patch for early signups)
             try {
-                await insforge.database.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
+                await supabaseClient.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
             } catch { /* safe to ignore, user might already exist */ }
 
-            const { data: joinedGroupId, error: joinError } = await insforge.database.rpc('join_group_by_invite_code', {
+            const { data: joinedGroupId, error: joinError } = await supabaseClient.rpc('join_group_by_invite_code', {
                 invite_code_param: joinCode.trim().toUpperCase(),
             });
             if (joinError || !joinedGroupId) throw new Error(joinError?.message || 'Invalid invite code');

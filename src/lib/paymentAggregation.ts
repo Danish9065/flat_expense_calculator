@@ -21,41 +21,58 @@ export interface ConsolidatedPayment {
 }
 
 /**
- * Combines the existing per-group settlement output for display and payment.
- * It intentionally does not net opposite directions or modify the underlying
- * group calculation, so every rupee remains traceable to its original group.
+ * Combines direct per-person balances across groups for display and payment.
+ * Opposite directions remain separate so each source group can be confirmed
+ * accurately without inventing a cross-group settlement record.
  */
 export function aggregateUserPayments(sources: GroupSettlementSource[], userId: string) {
-  const buckets = new Map<string, ConsolidatedPayment>();
+  const buckets = new Map<string, ConsolidatedPayment & { totalCents: number }>();
 
   for (const source of sources) {
     for (const settlement of source.settlements) {
-      if (settlement.amount <= 0 || (settlement.from !== userId && settlement.to !== userId)) continue;
+      if (
+        settlement.from === settlement.to ||
+        settlement.amount <= 0 ||
+        (settlement.from !== userId && settlement.to !== userId)
+      ) continue;
 
       const direction = settlement.from === userId ? 'pay' : 'receive';
       const counterpartyId = direction === 'pay' ? settlement.to : settlement.from;
       const key = `${direction}:${counterpartyId}`;
+      const amountCents = Math.round(settlement.amount * 100);
+      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) continue;
       const allocation: PaymentAllocation = {
         groupId: source.groupId,
         groupName: source.groupName,
         debtorId: settlement.from,
         creditorId: settlement.to,
-        amount: Math.round(settlement.amount * 100) / 100,
+        amount: amountCents / 100,
       };
 
       const existing = buckets.get(key);
       if (existing) {
         existing.allocations.push(allocation);
-        existing.total = Math.round((existing.total + allocation.amount) * 100) / 100;
+        existing.totalCents += amountCents;
+        existing.total = existing.totalCents / 100;
       } else {
-        buckets.set(key, { key, direction, counterpartyId, total: allocation.amount, allocations: [allocation] });
+        buckets.set(key, {
+          key,
+          direction,
+          counterpartyId,
+          total: allocation.amount,
+          totalCents: amountCents,
+          allocations: [allocation],
+        });
       }
     }
   }
 
   return Array.from(buckets.values())
     .map((payment) => ({
-      ...payment,
+      key: payment.key,
+      direction: payment.direction,
+      counterpartyId: payment.counterpartyId,
+      total: payment.total,
       allocations: [...payment.allocations].sort((a, b) => b.amount - a.amount),
     }))
     .sort((a, b) => {

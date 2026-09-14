@@ -1,4 +1,5 @@
-import insforge, { dbInsert } from '../lib/db';
+import { dbInsert, supabaseClient } from '../lib/db';
+import { calculateSettlementLedger, minimizeNetBalances } from '../lib/settlementCalculation';
 
 interface ExpenseBalanceRow {
     id: string;
@@ -7,6 +8,7 @@ interface ExpenseBalanceRow {
 }
 
 interface ExpenseSplitBalanceRow {
+    expense_id: string;
     user_id: string;
     amount_owed: string | number;
 }
@@ -81,7 +83,7 @@ export const SettlementService = {
         const creditorIds = new Set(allocations.map((allocation) => allocation.creditorId));
         if (creditorIds.size !== 1) throw new Error('A combined confirmation must have one receiver');
 
-        const { data, error } = await insforge.database.rpc('record_group_settlements_batch', {
+        const { data, error } = await supabaseClient.rpc('record_group_settlements_batch', {
             p_payments: allocations.map((allocation) => ({
                 group_id: allocation.groupId,
                 debtor_id: allocation.debtorId,
@@ -97,7 +99,7 @@ export const SettlementService = {
      */
     async calculateBalance(groupId: string, userId: string): Promise<{ totalPaid: number; totalOwed: number; netBalance: number }> {
         // Step 1: Get all expenses
-        const { data: expenses, error: expensesError } = await insforge.database
+        const { data: expenses, error: expensesError } = await supabaseClient
             .from('expenses')
             .select('id, added_by, amount')
             .eq('group_id', groupId);
@@ -110,9 +112,9 @@ export const SettlementService = {
         // Step 2: Get all expense splits
         let splits: ExpenseSplitBalanceRow[] = [];
         if (expenseIds.length > 0) {
-            const { data: splitsData, error: splitsError } = await insforge.database
+            const { data: splitsData, error: splitsError } = await supabaseClient
                 .from('expense_splits')
-                .select('user_id, amount_owed')
+                .select('expense_id, user_id, amount_owed')
                 .in('expense_id', expenseIds);
             
             if (splitsError) throw new Error(splitsError.message);
@@ -120,36 +122,24 @@ export const SettlementService = {
         }
 
         // Step 3: Get all settlements
-        const { data: settlements, error: settlementsError } = await insforge.database
+        const { data: settlements, error: settlementsError } = await supabaseClient
             .from('settlements')
             .select('paid_by, paid_to, amount')
             .eq('group_id', groupId);
             
         if (settlementsError) throw new Error(settlementsError.message);
 
-        let netBalance = 0;
-
-        for (const exp of expenseRows) {
-            if (exp.added_by === userId) {
-                netBalance += Number(exp.amount);
-            }
-        }
-
-        for (const split of splits) {
-            if (split.user_id === userId) {
-                netBalance -= Number(split.amount_owed);
-            }
-        }
-
-        for (const s of (settlements || []) as SettlementBalanceRow[]) {
-            if (s.paid_by === userId) netBalance += Number(s.amount);
-            if (s.paid_to === userId) netBalance -= Number(s.amount);
-        }
+        const calculation = calculateSettlementLedger(
+            expenseRows,
+            splits,
+            (settlements || []) as SettlementBalanceRow[],
+        );
+        const member = calculation.members.find((row) => row.userId === userId);
 
         return {
-            totalPaid: 0,
-            totalOwed: 0,
-            netBalance: Math.round(netBalance * 100) / 100,
+            totalPaid: member?.paid ?? 0,
+            totalOwed: member?.assignedShare ?? 0,
+            netBalance: member?.netBalance ?? 0,
         };
     },
 
@@ -202,48 +192,17 @@ export const SettlementService = {
      * Compute minimized transactions based on flat net balance.
      */
     _minimizeNetBalances(net: Record<string, number>): { from: string; to: string; amount: number }[] {
-        const creditors = Object.entries(net)
-            .filter(([, v]) => v > 0.01)
-            .map(([name, v]) => [name, v] as [string, number])
-            .sort((a, b) => b[1] - a[1]);                  // largest first
-
-        const debtors = Object.entries(net)
-            .filter(([, v]) => v < -0.01)
-            .map(([name, v]) => [name, v] as [string, number])
-            .sort((a, b) => a[1] - b[1]);                  // most negative first
-
-        const result: { from: string; to: string; amount: number }[] = [];
-        let i = 0, j = 0;
-
-        while (i < debtors.length && j < creditors.length) {
-            const [dName, dAmt] = debtors[i];    // negative value
-            const [cName, cAmt] = creditors[j];  // positive value
-
-            const settle = Math.min(-dAmt, cAmt);
-            result.push({
-                from: dName,
-                to: cName,
-                amount: Math.round(settle * 100) / 100,
-            });
-
-            (debtors[i] as [string, number])[1]   += settle;   // makes less negative
-            (creditors[j] as [string, number])[1] -= settle;   // makes less positive
-
-            if (Math.abs(debtors[i][1])   < 0.01) i++;
-            if (Math.abs(creditors[j][1]) < 0.01) j++;
-        }
-
-        result.sort((a, b) => b.amount - a.amount);
-        return result;
+        return minimizeNetBalances(net);
     },
 
     /**
-     * Calculate who owes whom using the pure net balance approach.
+     * Calculate direct person-to-person balances for a group. This preserves
+     * the original expense payer instead of arbitrarily rerouting equal debts.
      */
     async calculateGroupSettlements(groupId: string, members?: GroupMemberRow[], categoryFilter?: string) {
         void members;
         // Step 1: Get all expenses
-        let expQuery = insforge.database.from('expenses').select('id, added_by, amount').eq('group_id', groupId);
+        let expQuery = supabaseClient.from('expenses').select('id, added_by, amount').eq('group_id', groupId);
         if (categoryFilter && categoryFilter !== 'All') {
             expQuery = expQuery.eq('category', categoryFilter);
         }
@@ -256,9 +215,9 @@ export const SettlementService = {
         // Step 2: Get all expense splits
         let splits: ExpenseSplitBalanceRow[] = [];
         if (expenseIds.length > 0) {
-            const { data: splitsData, error: splitsError } = await insforge.database
+            const { data: splitsData, error: splitsError } = await supabaseClient
                 .from('expense_splits')
-                .select('user_id, amount_owed')
+                .select('expense_id, user_id, amount_owed')
                 .in('expense_id', expenseIds);
             
             if (splitsError) throw new Error(splitsError.message);
@@ -266,33 +225,26 @@ export const SettlementService = {
         }
 
         // Step 3: Get all settlements
-        const { data: settlements, error: settlementsError } = await insforge.database
+        const { data: settlements, error: settlementsError } = await supabaseClient
             .from('settlements')
             .select('paid_by, paid_to, amount')
             .eq('group_id', groupId);
             
         if (settlementsError) throw new Error(settlementsError.message);
 
-        // Compute net balance per user
-        const net: Record<string, number> = {};
-
-        for (const exp of expenseRows) {
-            const payer = exp.added_by;
-            net[payer] = (net[payer] ?? 0) + Number(exp.amount);
+        // Payments have no category field, so applying every historical payment
+        // to one category invents a category allocation that was never recorded.
+        const applicableSettlements = categoryFilter && categoryFilter !== 'All'
+            ? []
+            : (settlements || []) as SettlementBalanceRow[];
+        const calculation = calculateSettlementLedger(expenseRows, splits, applicableSettlements);
+        if (calculation.totals.balanceChecksum !== 0) {
+            throw new Error(
+                `Group ledger is out of balance by ₹${Math.abs(calculation.totals.balanceChecksum).toFixed(2)}. ` +
+                'One or more expenses do not have matching assigned shares.',
+            );
         }
-
-        for (const split of splits) {
-            const uid = split.user_id;
-            net[uid] = (net[uid] ?? 0) - Number(split.amount_owed);
-        }
-
-        for (const s of (settlements || []) as SettlementBalanceRow[]) {
-            net[s.paid_by] = (net[s.paid_by] ?? 0) + Number(s.amount);
-            net[s.paid_to] = (net[s.paid_to] ?? 0) - Number(s.amount);
-        }
-
-        // Step 4: Run minimization on net balances
-        return SettlementService._minimizeNetBalances(net);
+        return calculation.directSettlements;
     },
 
     /**
@@ -301,13 +253,13 @@ export const SettlementService = {
      * to the same helper; it never writes data or changes calculation behavior.
      */
     async getCalculationExplanation(groupId: string, categoryFilter = 'All'): Promise<CalculationExplanation> {
-        let expenseQuery = insforge.database
+        let expenseQuery = supabaseClient
             .from('expenses')
             .select('id,item_name,category,created_at,added_by,amount')
             .eq('group_id', groupId);
         if (categoryFilter !== 'All') expenseQuery = expenseQuery.eq('category', categoryFilter);
 
-        const settlementRequest = insforge.database
+        const settlementRequest = supabaseClient
             .from('settlements')
             .select('paid_by,paid_to,amount,settled_at,is_partial')
             .eq('group_id', groupId);
@@ -321,7 +273,7 @@ export const SettlementService = {
         const expenseIds = expenses.map((expense) => expense.id);
         let splits: ExplanationSplitRow[] = [];
         if (expenseIds.length > 0) {
-            const { data, error } = await insforge.database
+            const { data, error } = await supabaseClient
                 .from('expense_splits')
                 .select('expense_id,user_id,amount_owed')
                 .in('expense_id', expenseIds);
@@ -329,30 +281,10 @@ export const SettlementService = {
             splits = (data || []) as ExplanationSplitRow[];
         }
 
-        const priorPayments = (settlementData || []) as SettlementBalanceRow[];
-        const ledger: Record<string, Omit<MemberCalculationRow, 'userId' | 'netBalance'>> = {};
-        const ensureMember = (userId: string) => {
-            ledger[userId] ??= { paid: 0, assignedShare: 0, paymentsMade: 0, paymentsReceived: 0 };
-            return ledger[userId];
-        };
-
-        for (const expense of expenses) ensureMember(expense.added_by).paid += Number(expense.amount);
-        for (const split of splits) ensureMember(split.user_id).assignedShare += Number(split.amount_owed);
-        for (const payment of priorPayments) {
-            ensureMember(payment.paid_by).paymentsMade += Number(payment.amount);
-            ensureMember(payment.paid_to).paymentsReceived += Number(payment.amount);
-        }
-
-        const net: Record<string, number> = {};
-        const memberRows = Object.entries(ledger).map(([userId, row]) => {
-            const netBalance = row.paid - row.assignedShare + row.paymentsMade - row.paymentsReceived;
-            net[userId] = netBalance;
-            return { userId, ...row, netBalance: Math.round(netBalance * 100) / 100 };
-        });
-
-        const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
-        const shareTotal = splits.reduce((sum, split) => sum + Number(split.amount_owed), 0);
-        const paymentTotal = priorPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+        const priorPayments = categoryFilter === 'All'
+            ? (settlementData || []) as SettlementBalanceRow[]
+            : [];
+        const calculation = calculateSettlementLedger(expenses, splits, priorPayments);
 
         return {
             generatedAt: new Date().toISOString(),
@@ -360,15 +292,9 @@ export const SettlementService = {
             expenses,
             splits,
             priorPayments,
-            memberRows,
-            suggestedPayments: SettlementService._minimizeNetBalances({ ...net }),
-            totals: {
-                expenses: Math.round(expenseTotal * 100) / 100,
-                assignedShares: Math.round(shareTotal * 100) / 100,
-                priorPayments: Math.round(paymentTotal * 100) / 100,
-                balanceChecksum: Math.round(Object.values(net).reduce((sum, value) => sum + value, 0) * 100) / 100,
-                splitDifference: Math.round((expenseTotal - shareTotal) * 100) / 100,
-            },
+            memberRows: calculation.members,
+            suggestedPayments: calculation.settlements,
+            totals: calculation.totals,
         };
     },
 

@@ -21,14 +21,6 @@ export const supabaseClient = createClient(supabaseUrl, supabasePublishableKey, 
   },
 });
 
-/** PostgREST compatibility facade for the existing calculation service layer. */
-const backend = {
-  database: supabaseClient,
-  auth: supabaseClient.auth,
-  storage: supabaseClient.storage,
-  realtime: supabaseClient.realtime,
-};
-
 interface QueryResult<T = unknown> {
   data: T | null;
   error: unknown;
@@ -146,4 +138,3 @@ export async function dbDelete(table: string, params: string) {
 }
 
 export type { SupabaseClient };
-export default backend;

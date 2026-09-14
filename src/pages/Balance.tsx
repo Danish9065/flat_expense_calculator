@@ -57,6 +57,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const [settlingCard, setSettlingCard] = useState<string | null>(null); // `${from}__${to}`
     const [partialAmount, setPartialAmount] = useState<string>('');
     const [showCalculationReport, setShowCalculationReport] = useState(false);
+    const [calculationError, setCalculationError] = useState('');
 
     const [chartData, setChartData] = useState<ChartDatum[]>([]);
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
@@ -74,6 +75,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
         }
 
         try {
+            setCalculationError('');
             // 1. Chart Data: "Who paid what" total
             let expQuery = `group_id=eq.${groupId}&select=added_by,amount,category`;
             if (category !== 'All') expQuery += `&category=eq.${category}`;
@@ -91,6 +93,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
             // 2. Settlement Data: "How to settle up"
             const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, members, category);
+            const minimized = SettlementService.calculateMinimizedSettlements(calcSettlements);
 
             // 3. Fallback users for removed members
             const missingIds = new Set<string>();
@@ -133,10 +136,13 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             setChartData(cData);
             setCategoryTotals(catTotals);
             setSettlements(calcSettlements);
-            setMinimizedSettlements(calcSettlements);
+            setMinimizedSettlements(minimized);
 
         } catch (err) {
             console.error('Failed to load balance data', err);
+            setSettlements([]);
+            setMinimizedSettlements([]);
+            setCalculationError(err instanceof Error ? err.message : 'Could not calculate this group balance');
         } finally {
             setLoading(false);
             setIsRefreshing(false);
@@ -407,6 +413,12 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                 ))}
             </div>
 
+            {category !== 'All' ? (
+                <div className="mb-6 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm leading-relaxed text-amber-100/80">
+                    This category view shows its expense balance before group-level payments. Switch to <strong className="text-white">All</strong> to pay, remind, or confirm a settlement.
+                </div>
+            ) : null}
+
             {/* ── SECTION 1: How to Settle Up (Minimized) ── */}
             <div className="mb-2">
                 <div className="flex items-center space-x-2 mb-1">
@@ -422,9 +434,9 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
             {minimizedSettlements.length === 0 ? (
                 <div className="text-center py-12 app-panel border-dashed mb-6">
-                    <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />
-                    <p className="text-muted-foreground font-medium">All settled up!</p>
-                    <p className="text-sm text-white/35 mt-1">No pending balances in the group.</p>
+                    {calculationError ? <FileSearch className="w-12 h-12 text-amber-300 mx-auto mb-2 opacity-80" /> : <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />}
+                    <p className="text-muted-foreground font-medium">{calculationError ? 'Calculation unavailable' : 'All settled up!'}</p>
+                    <p className="text-sm text-white/35 mt-1">{calculationError || 'No pending balances in the group.'}</p>
                 </div>
             ) : (
                 <div className="space-y-3 mb-8">
@@ -455,7 +467,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                         <div className="text-right">
                                             <span className="block font-bold text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
-                                        {isCreditor ? (() => {
+                                        {isCreditor && category === 'All' ? (() => {
                                                 const settleAmount = s.amount;
                                                 const isCardSettling = settlingCard === settlingKey;
                                                 return isCardSettling ? null : (
@@ -468,7 +480,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                                         Settle
                                                     </button>
                                                 );
-                                            })() : isDebtor ? (
+                                            })() : isDebtor && category === 'All' ? (
                                             <div className="text-[10px] text-muted-foreground italic max-w-[80px] leading-tight text-center">
                                                 Pending payment...
                                             </div>
@@ -479,7 +491,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                 </div>
 
                                 {/* Inline partial-payment modal (minimized section) */}
-                                {settlingCard === settlingKey && isCreditor && (() => {
+                                {category === 'All' && settlingCard === settlingKey && isCreditor && (() => {
                                     const settleAmount = s.amount;
                                     return renderSettleModal(s.from, s.to, settleAmount);
                                 })()}
@@ -501,8 +513,8 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                     debtorWhatsApp={getMemberProfile(s.from)?.whatsapp_number}
                                     creditorName={getMemberName(s.to).split(' ')[0]}
                                     creditorUpiId={getMemberProfile(s.to)?.upi_id}
-                                    isDebtor={isDebtor}
-                                    isCreditor={isCreditor}
+                                    isDebtor={category === 'All' && isDebtor}
+                                    isCreditor={category === 'All' && isCreditor}
                                     onInfo={success}
                                     onError={showError}
                                 />
@@ -527,9 +539,9 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
             {settlements.length === 0 ? (
                 <div className="text-center py-12 app-panel border-dashed">
-                    <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />
-                    <p className="text-muted-foreground font-medium">All settled up!</p>
-                    <p className="text-sm text-white/35 mt-1">No pending balances in the group.</p>
+                    {calculationError ? <FileSearch className="w-12 h-12 text-amber-300 mx-auto mb-2 opacity-80" /> : <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />}
+                    <p className="text-muted-foreground font-medium">{calculationError ? 'Calculation unavailable' : 'All settled up!'}</p>
+                    <p className="text-sm text-white/35 mt-1">{calculationError || 'No pending balances in the group.'}</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -562,7 +574,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                             const isSettlingNow = settling === settlingKey;
                                             const isCardSettling = settlingCard === settlingKey;
 
-                                            if (isCreditor) {
+                                            if (isCreditor && category === 'All') {
                                                 // If modal is open for this card, hide the button
                                                 if (isCardSettling) return null;
                                                 return (
@@ -576,7 +588,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                                     </button>
                                                 );
                                             }
-                                            if (isDebtor) {
+                                            if (isDebtor && category === 'All') {
                                                 return (
                                                     <div className="text-[10px] text-muted-foreground italic max-w-[80px] leading-tight text-center">
                                                         Pending payment...
@@ -590,7 +602,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                 </div>
 
                                 {/* Inline partial-payment modal (full breakdown section) */}
-                                {settlingCard === `${s.from}__${s.to}` && user?.id === s.to &&
+                                {category === 'All' && settlingCard === `${s.from}__${s.to}` && user?.id === s.to &&
                                     renderSettleModal(s.from, s.to, s.amount)
                                 }
 

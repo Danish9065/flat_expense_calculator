@@ -1,6 +1,6 @@
 # Project Structure
 
-This project is a React 19 + TypeScript + Vite expense sharing app named SplitMate. It uses Tailwind CSS 3.4, React Router, InsForge for backend services, Recharts for charts, lucide-react for icons, and browser-image-compression for receipt uploads.
+This project is a React 19 + TypeScript + Vite expense sharing app named SplitMate. It uses Tailwind CSS 3.4, React Router, Supabase for backend services, Recharts for charts, lucide-react for icons, and browser-image-compression for receipt uploads.
 
 Important rule for future UI work: change presentation only. Keep the routes, context values, service functions, database table usage, storage buckets, localStorage keys, event names, and user workflows unchanged unless a separate feature task explicitly asks for logic changes.
 
@@ -16,9 +16,9 @@ Important rule for future UI work: change presentation only. Keep the routes, co
 | `env.example` | Environment variable example file. |
 | `vercel.json` | Deployment configuration. |
 | `public/manifest.json` | PWA manifest for SplitMate. |
-| `public/sw.js` | Service worker with network-first HTML caching and cache-first asset caching. Excludes InsForge/API requests. |
+| `public/sw.js` | Service worker with network-first HTML caching and cache-first asset caching. Excludes Supabase/API requests. |
 | `sql_script.sql` | SQL for notifications and database triggers. Note: the settlement trigger appears to reference `from_user_id`/`to_user_id`, while app code writes `paid_by`/`paid_to`; verify before applying it to a backend. |
-| `test_*.js` / `recover_admin.mjs` | Local backend/test/debug helper scripts. |
+| `tests/` | Local unit tests for payment, storage, country-phone, and aggregation helpers. |
 
 ## Source Layout
 
@@ -47,7 +47,6 @@ src/
     useRealtimeSync.ts
   lib/
     db.ts
-    insforge.ts
   pages/
     Admin.tsx
     Balance.tsx
@@ -114,32 +113,25 @@ Do not remove these wrappers during UI redesign. Many pages assume `useAuth`, `u
 
 ### `src/lib/db.ts`
 
-Creates the InsForge client using:
+Creates the Supabase browser client using:
 
-- `VITE_INSFORGE_URL`
-- `VITE_INSFORGE_ANON_KEY`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 Exports:
 
-- `setAuthToken(token)`
+- `supabaseClient`
 - `dbQuery(table, params)`
 - `dbInsert(table, body)`
 - `dbUpdate(table, params, body)`
 - `dbDelete(table, params)`
-- default `insforge`
 
-The helper layer parses PostgREST-like query strings and maps them to SDK calls. It also handles access token refresh, queues concurrent refresh subscribers, updates `splitmate-user` in localStorage, and dispatches `auth:logout` only when refresh is truly rejected.
+The helper layer parses PostgREST-like query strings and maps them to Supabase calls. It waits for the persisted session, retries once after an expired token, and preserves the existing service return shapes.
 
 Preserve:
 
 - `splitmate-user` localStorage key.
-- `auth:logout` window event.
-- Refresh endpoint: `/api/auth/refresh?client_type=mobile`.
 - Query helper behavior and return shapes.
-
-### `src/lib/insforge.ts`
-
-Re-exports the database client/helpers from `db.ts`. Keep this compatibility file if imports still reference it.
 
 ## Contexts
 
@@ -148,8 +140,7 @@ Re-exports the database client/helpers from `db.ts`. Keep this compatibility fil
 Responsibilities:
 
 - Optimistically loads cached user session from `localStorage.getItem('splitmate-user')`.
-- Sets InsForge auth token synchronously when cached token exists.
-- Silently refreshes expired JWTs on boot.
+- Restores and refreshes the persisted Supabase session on boot.
 - Fetches fresh user profile fields from `users`.
 - Provides `user`, `role`, `loading`, `signIn`, and `signOut`.
 - Redirects successful login to `/admin` for admins or `/dashboard` for members.

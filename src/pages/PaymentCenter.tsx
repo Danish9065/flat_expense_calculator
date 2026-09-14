@@ -186,7 +186,8 @@ export default function PaymentCenter() {
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-bold text-white"><span className="inline-flex items-center gap-2"><ReceiptText className="h-4 w-4 text-primary" />See group calculation</span><ChevronDown className="h-4 w-4 text-muted-foreground" /></summary>
                       <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
                         {payment.allocations.map((allocation) => <div key={`${allocation.groupId}:${allocation.debtorId}:${allocation.creditorId}`} className="flex items-center justify-between gap-3 text-sm"><span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground"><Users className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{allocation.groupName}</span></span><strong className="shrink-0 text-white">₹{allocation.amount.toFixed(2)}</strong></div>)}
-                        <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm"><span className="font-bold text-white">Combined total</span><strong className="text-primary">₹{payment.total.toFixed(2)}</strong></div>
+                        <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm"><span className="font-bold text-white">{isPaying ? 'Your combined payment' : 'Combined amount to you'}</span><strong className="text-primary">₹{payment.total.toFixed(2)}</strong></div>
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">Each line is the direct amount between you and this person in that group—not their total group balance. They may separately owe or receive money from another group member.</p>
                       </div>
                     </details>
 

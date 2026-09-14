@@ -1,4 +1,5 @@
 import { dbInsert, dbQuery, dbUpdate, dbDelete } from '../lib/db';
+import { distributeExpenseAmount } from '../lib/settlementCalculation';
 
 export interface ExpenseData {
     group_id: string;
@@ -19,34 +20,6 @@ interface ExpenseRow extends ExpenseData {
 
 interface GroupMemberRow {
     user_id: string;
-}
-
-/**
- * Distribute a total amount across members using integer cent arithmetic.
- *
- * Works entirely in cents (integers) to eliminate floating-point drift.
- * The payer absorbs all remainder cents (leftover after even division).
- *
- * Example: ₹100 split 3 ways → ₹33.33, ₹33.33, ₹33.34 (payer gets the extra cent)
- *
- * Returns an array of { userId, amount_owed } in the same order as memberIds.
- */
-function distributeSplit(totalAmount: number, memberIds: string[], payerUserId: string) {
-    const n = memberIds.length;
-
-    // Work in integer cents to avoid float precision drift
-    const totalCents = Math.round(totalAmount * 100);
-    const baseCents = Math.floor(totalCents / n);
-    const remainderCents = totalCents - baseCents * n; // always 0 to (n-1)
-
-    // Find payer index; if payer is not in the split list fall back to index 0
-    const payerIndex = memberIds.indexOf(payerUserId) !== -1 ? memberIds.indexOf(payerUserId) : 0;
-
-    return memberIds.map((userId, i) => ({
-        userId,
-        // Payer absorbs all remainder cents — convert back to rupees
-        amount_owed: (i === payerIndex ? baseCents + remainderCents : baseCents) / 100,
-    }));
 }
 
 export const ExpenseService = {
@@ -86,7 +59,7 @@ export const ExpenseService = {
         }
 
         if (!splitMemberIds || splitMemberIds.length === 0) throw new Error('No members to split with');
-        const splits = distributeSplit(expenseData.amount, splitMemberIds, expenseData.added_by);
+        const splits = distributeExpenseAmount(expenseData.amount, splitMemberIds, expenseData.added_by);
 
         for (const split of splits) {
             await dbInsert('expense_splits', {
@@ -129,10 +102,10 @@ export const ExpenseService = {
             }
 
             const totalAmount = updates.amount !== undefined ? updates.amount : expense.amount;
-            // Use the original payer (expense.added_by) so remainder still goes to them
+            // Use the original payer so they receive the first remainder paisa.
             if (!splitMemberIds || splitMemberIds.length === 0) throw new Error('No members to split with');
             const payerUserId = updates.added_by ?? expense.added_by;
-            const splits = distributeSplit(totalAmount, splitMemberIds, payerUserId);
+            const splits = distributeExpenseAmount(totalAmount, splitMemberIds, payerUserId);
 
             for (const split of splits) {
                 await dbInsert('expense_splits', {

@@ -1,5 +1,5 @@
 {
-  "name": "insforge-react",
+  "name": "splitmate",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test:auth": "node --test tests/auth-proxy.test.mjs",
     "test:payments": "node --test tests/payment-links.test.mjs",
     "test:payment-center": "node --test tests/payment-aggregation.test.mjs",
+    "test:calculations": "node --test tests/settlement-calculation.test.mjs tests/payment-aggregation.test.mjs",
     "test:storage": "node --test tests/storage.test.mjs",
     "preview": "vite preview"
   },
@@ -28,7 +28,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@insforge/sdk": "1.5.2",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

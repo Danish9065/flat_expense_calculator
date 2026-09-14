@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import insforge from '../lib/db';
+import { supabaseClient } from '../lib/db';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { User, Mail, Lock, Key, Eye, EyeOff, Loader2, ReceiptText, MessageCircle, WalletCards } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
@@ -60,13 +60,13 @@ export default function Signup() {
         setLoading(true);
         try {
             const normalizedInviteKey = inviteKey.trim().toUpperCase();
-            const { data: keyIsValid, error: keyError } = await insforge.database.rpc('validate_invite_key', {
+            const { data: keyIsValid, error: keyError } = await supabaseClient.rpc('validate_invite_key', {
                 key_code_param: normalizedInviteKey,
             });
 
             if (keyError || keyIsValid !== true) throw new Error('Invalid or already used invite key');
 
-            const { error: authError } = await insforge.auth.signUp({
+            const { error: authError } = await supabaseClient.auth.signUp({
                 email,
                 password,
                 options: {

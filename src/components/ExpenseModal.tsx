@@ -8,6 +8,7 @@ import imageCompression from 'browser-image-compression';
 import { dbQuery } from '../lib/db';
 import { CATEGORIES } from '../constants/categories';
 import { safeStorageFileName, uploadPrivateFile } from '../lib/storage';
+import { distributeExpenseAmount } from '../lib/settlementCalculation';
 
 interface ExpenseModalProps {
     isOpen: boolean;
@@ -254,9 +255,14 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
         }
     };
 
-    const splitPreview = splitBetween.length > 0 && amount
-        ? (parseFloat(amount) / splitBetween.length).toFixed(2)
-        : '0.00';
+    const splitPreview = splitBetween.length > 0 && amount && user
+        ? distributeExpenseAmount(parseFloat(amount), splitBetween, user.id).map((split) => split.amount_owed)
+        : [0];
+    const smallestShare = Math.min(...splitPreview);
+    const largestShare = Math.max(...splitPreview);
+    const splitPreviewLabel = smallestShare === largestShare
+        ? `₹${smallestShare.toFixed(2)} each`
+        : `₹${smallestShare.toFixed(2)}–₹${largestShare.toFixed(2)}`;
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-0">
@@ -428,7 +434,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                         {/* Live Preview */}
                         <div className="bg-primary/10 p-3 rounded-xl border border-primary/20 flex items-center justify-between mt-5">
                             <span className="text-sm text-primary font-medium">Split equally among {splitBetween.length} members</span>
-                            <span className="font-bold text-primary">₹{splitPreview} each</span>
+                            <span className="font-bold text-primary">{splitPreviewLabel}</span>
                         </div>
 
                     </form>

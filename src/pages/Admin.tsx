@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import insforge from '../lib/db';
-import { dbQuery, dbDelete } from '../lib/db';
+import { dbQuery, dbDelete, supabaseClient } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useGroup } from '../context/GroupContext';
@@ -94,7 +93,7 @@ export default function Admin() {
         try {
             const newKey = generateInviteKey();
 
-            const { error } = await insforge.database
+            const { error } = await supabaseClient
                 .from('invite_keys')
                 .insert({
                     key_code: newKey,

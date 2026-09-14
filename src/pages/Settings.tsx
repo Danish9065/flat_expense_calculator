@@ -1,6 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import insforge from '../lib/db';
-import { dbQuery, dbUpdate } from '../lib/db';
+import { dbQuery, dbUpdate, supabaseClient } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards, Pencil, CheckCircle2, X } from 'lucide-react';
@@ -169,7 +168,7 @@ export default function Settings() {
         if (!user) throw new Error('Authentication required');
         const { whatsapp_number, upi_id } = getNormalizedPaymentDetails();
 
-        const { data, error } = await insforge.database
+        const { data, error } = await supabaseClient
                 .from('user_payment_profiles')
                 .upsert({
                     user_id: user.id,

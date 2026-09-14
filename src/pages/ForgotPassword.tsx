@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import insforge from '../lib/db';
+import { supabaseClient } from '../lib/db';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Loader2, ArrowLeft } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
@@ -16,7 +16,7 @@ export default function ForgotPassword() {
         setLoading(true);
 
         try {
-            const { error } = await insforge.auth.resetPasswordForEmail(email, {
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
                 redirectTo: `${window.location.origin}/reset-password`,
             });
 

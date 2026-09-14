@@ -34,8 +34,7 @@ asad_calculation.*
 # Private backend recovery artifacts (database dumps, storage exports, manifests)
 .recovery/
 
-# InsForge & AI agent skills
-.insforge
+# AI agent skills
 .agent
 .agents
 .augment

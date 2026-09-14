@@ -40,7 +40,7 @@ Behavior:
 
 - Validates invite key against `invite_keys` where `is_used=false`.
 - Rejects expired invite keys.
-- Calls `insforge.auth.signUp({ email, password })`.
+- Calls `supabaseClient.auth.signUp({ email, password, options })`.
 - Treats "already exists" auth response as non-fatal.
 - Navigates to `/verify-otp` with `email`, `fullName`, and `inviteKey` in route state.
 
@@ -57,7 +57,7 @@ User can:
 Behavior:
 
 - Redirects to `/signup` if route state has no email.
-- Calls `insforge.auth.verifyEmail({ email, otp })`.
+- Calls `supabaseClient.auth.verifyOtp({ email, token: otp, type: 'signup' })`.
 - Upserts a member row into `users`.
 - Calls RPC `consume_invite_key` with `key_code_param` and `target_user_id`.
 - Navigates to `/login` after successful verification.
@@ -74,7 +74,7 @@ User can:
 
 Behavior:
 
-- Calls `insforge.auth.sendResetPasswordEmail({ email })`.
+- Calls `supabaseClient.auth.resetPasswordForEmail(email)`.
 - Navigates to `/verify-password-otp` with email in route state.
 
 ### Password OTP Verification
@@ -90,7 +90,7 @@ User can:
 Behavior:
 
 - Redirects to `/forgot-password` if route state has no email.
-- Calls `insforge.auth.exchangeResetPasswordToken({ email, code })`.
+- Calls `supabaseClient.auth.verifyOtp({ email, token: code, type: 'recovery' })`.
 - Navigates to `/reset-password` with `resetToken` and `email`.
 
 ### Reset Password
@@ -108,7 +108,7 @@ Behavior:
 - Redirects to `/forgot-password` if no reset token exists.
 - Requires password length of at least 6.
 - Requires matching passwords.
-- Calls `insforge.auth.resetPassword({ newPassword, otp: resetToken })`.
+- Calls `supabaseClient.auth.updateUser({ password: newPassword })` after recovery verification.
 - Navigates to `/login` after success.
 
 ## Navigation And Shell
@@ -332,7 +332,7 @@ Behavior:
 - Deletes old avatar from `avatars` bucket when old URL points to that bucket.
 - Uploads new avatar with `uploadAuto`.
 - Updates `users` row with `full_name`, `avatar_url`, and `currency`.
-- Attempts `insforge.auth.setProfile` for legacy auth profile metadata.
+- Refreshes the Supabase-backed application profile after saving.
 - Shows success toast and reloads the page after one second to refresh auth context.
 
 Note: current app displays rupee symbols in most expense/balance UI regardless of saved currency. Do not claim full multi-currency display support unless implementing it separately.
@@ -499,4 +499,3 @@ Do not rename these in UI-only work:
 - Activity feed polling says "real-time" in text, but it uses 10-second polling for notifications.
 - `Balance.tsx` labels one section "Full Balance Breakdown", but currently both minimized and full sections use the same calculated settlement list.
 - `sql_script.sql` settlement notification trigger may be out of sync with app settlement column names.
-
