@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { dbQuery, dbDelete, supabaseClient } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -347,7 +347,6 @@ export default function Admin() {
                 title="Delete User"
                 confirmText="Delete"
                 message={`Are you sure you want to permanently delete ${userToDelete?.full_name}? This will also remove them from the group.`}
-                isDestructive={true}
             />
 
             <ConfirmModal
@@ -357,7 +356,6 @@ export default function Admin() {
                 title="Remove User from Group"
                 message={removeWarning}
                 confirmText="Remove from Group"
-                isDestructive={true}
             />
 
             <ConfirmModal

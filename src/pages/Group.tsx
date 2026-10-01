@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { dbQuery, dbInsert, dbUpdate, supabaseClient } from '../lib/db';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { useToast } from '../context/ToastContext';

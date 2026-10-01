@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run typecheck && npm test && vite build",
+    "typecheck": "tsc -b",
+    "test": "node --test tests/*.test.mjs",
     "lint": "eslint .",
     "test:payments": "node --test tests/payment-links.test.mjs",
     "test:payment-center": "node --test tests/payment-aggregation.test.mjs",

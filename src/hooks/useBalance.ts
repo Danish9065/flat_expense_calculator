@@ -1,45 +1,30 @@
-import { useState, useEffect } from 'react';
-import { dbQuery } from '../lib/db';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { SettlementService } from '../services/settlementService';
 
-interface ExpenseAmountRow {
-    amount: string | number;
-}
-
-interface ExpenseSplitAmountRow {
-    amount_owed: string | number;
-}
-
-export function useBalance(groupId: string | null, userId: string | null, category: string = 'All') {
+export function useBalance(groupId: string | null, userId: string | null, category = 'All') {
     const [balance, setBalance] = useState(0);
     const [loading, setLoading] = useState(true);
-
-    const calculateBalance = async () => {
-        if (!groupId || !userId) return;
-
+    const [error, setError] = useState<string | null>(null);
+    const request = useRef(0);
+    const recalculate = useCallback(async () => {
+        const id = ++request.current;
+        setLoading(true);
         try {
-            setLoading(true);
-            let paidQuery = `group_id=eq.${groupId}&added_by=eq.${userId}&select=amount`;
-            if (category !== 'All') paidQuery += `&category=eq.${category}`;
-            const paid = await dbQuery('expenses', paidQuery);
-
-            const totalPaid = (paid as ExpenseAmountRow[] | null)?.reduce((sum, e) => sum + parseFloat(String(e.amount)), 0) ?? 0;
-
-            let owedQuery = `user_id=eq.${userId}&is_settled=eq.false&select=amount_owed,expenses!inner(category)`;
-            if (category !== 'All') owedQuery += `&expenses.category=eq.${category}`;
-            const owed = await dbQuery('expense_splits', owedQuery);
-
-            const totalOwed = (owed as ExpenseSplitAmountRow[] | null)?.reduce((sum, s) => sum + parseFloat(String(s.amount_owed)), 0) ?? 0;
-
-            setBalance(parseFloat((totalPaid - totalOwed).toFixed(2)));
-        } catch (e) { console.error(e) } finally {
-            setLoading(false);
+            if (!groupId || !userId) { setBalance(0); setError(null); return; }
+            const report = await SettlementService.getCalculationExplanation(groupId, category);
+            if (id !== request.current) return;
+            if (report.issues.length) throw new Error(report.issues[0]);
+            setBalance(report.memberRows.find((row) => row.userId === userId)?.netBalance ?? 0);
+            setError(null);
+        } catch (cause) {
+            if (id === request.current) setError(cause instanceof Error ? cause.message : 'Calculation unavailable');
+        } finally {
+            if (id === request.current) setLoading(false);
         }
-    };
-
-    useEffect(() => {
-        calculateBalance();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [groupId, userId, category]);
-
-    return { balance, loading, recalculate: calculateBalance };
+    useEffect(() => {
+        void recalculate();
+        return () => { request.current += 1; };
+    }, [recalculate]);
+    return { balance, loading, error, recalculate };
 }

@@ -57,6 +57,19 @@ test('adds merged-group allocations in integer paise', () => {
   assert.equal(result[0].allocations.reduce((sum, item) => sum + Math.round(item.amount * 100), 0), 86814);
 });
 
+test('summary totals add every displayed card in integer paise', () => {
+  const payments = aggregation.aggregateUserPayments([
+    { groupId: 'g1', groupName: 'One', settlements: [{ from: 'me', to: 'a', amount: 0.1 }] },
+    { groupId: 'g2', groupName: 'Two', settlements: [{ from: 'me', to: 'b', amount: 0.2 }] },
+    { groupId: 'g3', groupName: 'Three', settlements: [{ from: 'c', to: 'me', amount: 0.3 }] },
+  ], 'me');
+
+  assert.deepEqual(aggregation.summarizeUserPayments(payments), {
+    toPay: 0.3,
+    toReceive: 0.3,
+  });
+});
+
 test('keeps different people in the same group as separate balances', () => {
   const result = aggregation.aggregateUserPayments([
     {
@@ -120,17 +133,17 @@ test('does not mutate source settlements while sorting allocations', () => {
   assert.deepEqual(sources, snapshot);
 });
 
-test('production all-group fixture gives Danish the exact direct merged totals', () => {
+test('production all-group fixture gives Danish the exact canonical merged totals', () => {
   const result = aggregation.aggregateUserPayments([
     {
       groupId: 'flat-204',
       groupName: 'FLAT-204',
       settlements: [
-        { from: 'adnan', to: 'danish', amount: 13.33 },
-        { from: 'alfaiz', to: 'danish', amount: 46.66 },
-        { from: 'ibtehaj', to: 'danish', amount: 46.66 },
-        { from: 'ashad', to: 'danish', amount: 46.66 },
-        { from: 'yazz', to: 'danish', amount: 46.66 },
+        { from: 'alfaiz', to: 'danish', amount: 79.99 },
+        { from: 'ashad', to: 'danish', amount: 79.99 },
+        { from: 'yazz', to: 'adnan', amount: 79.99 },
+        { from: 'ibtehaj', to: 'adnan', amount: 40 },
+        { from: 'ibtehaj', to: 'danish', amount: 39.99 },
       ],
     },
     {
@@ -147,10 +160,10 @@ test('production all-group fixture gives Danish the exact direct merged totals',
   ], 'danish');
 
   assert.deepEqual(result.map((payment) => [payment.counterpartyId, payment.total]), [
-    ['ibtehaj', 874.81],
-    ['yazz', 874.81],
-    ['adnan', 841.48],
-    ['alfaiz', 376.06],
-    ['ashad', 46.66],
+    ['ibtehaj', 868.14],
+    ['adnan', 828.15],
+    ['yazz', 828.15],
+    ['alfaiz', 409.39],
+    ['ashad', 79.99],
   ]);
 });

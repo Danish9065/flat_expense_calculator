@@ -1,4 +1,5 @@
 import { dbInsert, supabaseClient } from '../lib/db';
+import { readAllPages } from '../lib/pagination';
 import { calculateSettlementLedger, minimizeNetBalances } from '../lib/settlementCalculation';
 
 interface ExpenseBalanceRow {
@@ -47,6 +48,8 @@ export interface CalculationExplanation {
     splits: ExplanationSplitRow[];
     priorPayments: SettlementBalanceRow[];
     memberRows: MemberCalculationRow[];
+    issues: string[];
+    directPayments: { from: string; to: string; amount: number }[];
     suggestedPayments: { from: string; to: string; amount: number }[];
     totals: {
         expenses: number;
@@ -72,6 +75,36 @@ interface BatchSettlementAllocation {
     amount: number;
 }
 
+const recordingGroups = new Set<string>();
+
+/** Recheck displayed amounts immediately before confirmation; serialize this client's writes. */
+async function confirmCurrentPayments<T>(allocations: BatchSettlementAllocation[], exact: boolean, write: () => Promise<T>) {
+    const groups = [...new Set(allocations.map((allocation) => allocation.groupId))];
+    if (groups.some((id) => recordingGroups.has(id))) throw new Error('A payment is already being recorded. Please wait.');
+    groups.forEach((id) => recordingGroups.add(id));
+    try {
+        const keys = new Set<string>();
+        const plans = new Map(await Promise.all(groups.map(async (id) =>
+            [id, await SettlementService.calculateGroupSettlements(id)] as const)));
+        for (const allocation of allocations) {
+            const key = `${allocation.groupId}:${allocation.debtorId}:${allocation.creditorId}`;
+            const cents = Math.round(allocation.amount * 100);
+            if (keys.has(key) || !Number.isSafeInteger(cents) || cents <= 0 || Math.abs(cents / 100 - allocation.amount) > 0.000001) {
+                throw new Error('Payment amounts must be positive, unique and have at most two decimal places.');
+            }
+            keys.add(key);
+            const payment = plans.get(allocation.groupId)?.find((row) => row.from === allocation.debtorId && row.to === allocation.creditorId);
+            const available = Math.round((payment?.amount ?? 0) * 100);
+            if (cents > available || (exact && cents !== available)) {
+                throw new Error('This payment amount has changed. Refresh and review the current calculation before confirming.');
+            }
+        }
+        return await write();
+    } finally {
+        groups.forEach((id) => recordingGroups.delete(id));
+    }
+}
+
 export const SettlementService = {
     /**
      * Records a creditor-confirmed combined payment atomically across groups.
@@ -83,6 +116,7 @@ export const SettlementService = {
         const creditorIds = new Set(allocations.map((allocation) => allocation.creditorId));
         if (creditorIds.size !== 1) throw new Error('A combined confirmation must have one receiver');
 
+        return confirmCurrentPayments(allocations, true, async () => {
         const { data, error } = await supabaseClient.rpc('record_group_settlements_batch', {
             p_payments: allocations.map((allocation) => ({
                 group_id: allocation.groupId,
@@ -92,49 +126,16 @@ export const SettlementService = {
         });
         if (error) throw new Error(error.message || 'Failed to record combined payment');
         return data;
+        });
     },
 
     /**
      * Calculate the net balance for a single user in a group.
      */
     async calculateBalance(groupId: string, userId: string): Promise<{ totalPaid: number; totalOwed: number; netBalance: number }> {
-        // Step 1: Get all expenses
-        const { data: expenses, error: expensesError } = await supabaseClient
-            .from('expenses')
-            .select('id, added_by, amount')
-            .eq('group_id', groupId);
-
-        if (expensesError) throw new Error(expensesError.message);
-
-        const expenseRows = (expenses || []) as ExpenseBalanceRow[];
-        const expenseIds = expenseRows.map((e) => e.id);
-
-        // Step 2: Get all expense splits
-        let splits: ExpenseSplitBalanceRow[] = [];
-        if (expenseIds.length > 0) {
-            const { data: splitsData, error: splitsError } = await supabaseClient
-                .from('expense_splits')
-                .select('expense_id, user_id, amount_owed')
-                .in('expense_id', expenseIds);
-            
-            if (splitsError) throw new Error(splitsError.message);
-            splits = (splitsData || []) as ExpenseSplitBalanceRow[];
-        }
-
-        // Step 3: Get all settlements
-        const { data: settlements, error: settlementsError } = await supabaseClient
-            .from('settlements')
-            .select('paid_by, paid_to, amount')
-            .eq('group_id', groupId);
-            
-        if (settlementsError) throw new Error(settlementsError.message);
-
-        const calculation = calculateSettlementLedger(
-            expenseRows,
-            splits,
-            (settlements || []) as SettlementBalanceRow[],
-        );
-        const member = calculation.members.find((row) => row.userId === userId);
+        const report = await SettlementService.getCalculationExplanation(groupId);
+        if (report.issues.length) throw new Error(report.issues[0]);
+        const member = report.memberRows.find((row) => row.userId === userId);
 
         return {
             totalPaid: member?.paid ?? 0,
@@ -150,14 +151,14 @@ export const SettlementService = {
     async settleUp(groupId: string, debtorId: string, creditorId: string, amount: number) {
         if (debtorId === creditorId) throw new Error('Debtor and creditor cannot be the same person');
 
-        await dbInsert('settlements', {
+        await confirmCurrentPayments([{ groupId, debtorId, creditorId, amount }], true, () => dbInsert('settlements', {
             group_id: groupId,
             paid_by: debtorId,
             paid_to: creditorId,
             amount: amount,
             settled_at: new Date().toISOString(),
             is_partial: false
-        });
+        }));
 
         return true;
     },
@@ -173,14 +174,15 @@ export const SettlementService = {
     ): Promise<{ settled: number; remaining: number }> {
         if (debtorId === creditorId) throw new Error('Debtor and creditor cannot be the same person');
 
-        await dbInsert('settlements', {
+        if (!Number.isSafeInteger(partialAmountCents) || partialAmountCents <= 0) throw new Error('Invalid partial payment');
+        await confirmCurrentPayments([{ groupId, debtorId, creditorId, amount: partialAmountCents / 100 }], false, () => dbInsert('settlements', {
             group_id: groupId,
             paid_by: debtorId,
             paid_to: creditorId,
             amount: partialAmountCents / 100,
             settled_at: new Date().toISOString(),
             is_partial: true
-        });
+        }));
 
         return {
             settled: partialAmountCents / 100,
@@ -196,55 +198,18 @@ export const SettlementService = {
     },
 
     /**
-     * Calculate direct person-to-person balances for a group. This preserves
-     * the original expense payer instead of arbitrarily rerouting equal debts.
+     * Calculate the canonical minimized payment plan for a group.
+     *
+     * Every consumer (group details, Payment Center, exports, and payment
+     * confirmation) must use this same plan. Returning direct expense-payer
+     * debts here makes the all-groups view disagree with "How to Settle Up"
+     * whenever a member has both debits and credits inside one group.
      */
     async calculateGroupSettlements(groupId: string, members?: GroupMemberRow[], categoryFilter?: string) {
         void members;
-        // Step 1: Get all expenses
-        let expQuery = supabaseClient.from('expenses').select('id, added_by, amount').eq('group_id', groupId);
-        if (categoryFilter && categoryFilter !== 'All') {
-            expQuery = expQuery.eq('category', categoryFilter);
-        }
-        const { data: expenses, error: expensesError } = await expQuery;
-        if (expensesError) throw new Error(expensesError.message);
-
-        const expenseRows = (expenses || []) as ExpenseBalanceRow[];
-        const expenseIds = expenseRows.map((e) => e.id);
-
-        // Step 2: Get all expense splits
-        let splits: ExpenseSplitBalanceRow[] = [];
-        if (expenseIds.length > 0) {
-            const { data: splitsData, error: splitsError } = await supabaseClient
-                .from('expense_splits')
-                .select('expense_id, user_id, amount_owed')
-                .in('expense_id', expenseIds);
-            
-            if (splitsError) throw new Error(splitsError.message);
-            splits = (splitsData || []) as ExpenseSplitBalanceRow[];
-        }
-
-        // Step 3: Get all settlements
-        const { data: settlements, error: settlementsError } = await supabaseClient
-            .from('settlements')
-            .select('paid_by, paid_to, amount')
-            .eq('group_id', groupId);
-            
-        if (settlementsError) throw new Error(settlementsError.message);
-
-        // Payments have no category field, so applying every historical payment
-        // to one category invents a category allocation that was never recorded.
-        const applicableSettlements = categoryFilter && categoryFilter !== 'All'
-            ? []
-            : (settlements || []) as SettlementBalanceRow[];
-        const calculation = calculateSettlementLedger(expenseRows, splits, applicableSettlements);
-        if (calculation.totals.balanceChecksum !== 0) {
-            throw new Error(
-                `Group ledger is out of balance by ₹${Math.abs(calculation.totals.balanceChecksum).toFixed(2)}. ` +
-                'One or more expenses do not have matching assigned shares.',
-            );
-        }
-        return calculation.directSettlements;
+        const report = await SettlementService.getCalculationExplanation(groupId, categoryFilter);
+        if (report.issues.length) throw new Error(report.issues[0]);
+        return report.suggestedPayments;
     },
 
     /**
@@ -253,37 +218,32 @@ export const SettlementService = {
      * to the same helper; it never writes data or changes calculation behavior.
      */
     async getCalculationExplanation(groupId: string, categoryFilter = 'All'): Promise<CalculationExplanation> {
-        let expenseQuery = supabaseClient
-            .from('expenses')
-            .select('id,item_name,category,created_at,added_by,amount')
-            .eq('group_id', groupId);
-        if (categoryFilter !== 'All') expenseQuery = expenseQuery.eq('category', categoryFilter);
-
-        const settlementRequest = supabaseClient
-            .from('settlements')
-            .select('paid_by,paid_to,amount,settled_at,is_partial')
-            .eq('group_id', groupId);
-
-        const [{ data: expenseData, error: expenseError }, { data: settlementData, error: settlementError }] =
-            await Promise.all([expenseQuery, settlementRequest]);
-        if (expenseError) throw new Error(expenseError.message);
-        if (settlementError) throw new Error(settlementError.message);
-
-        const expenses = (expenseData || []) as ExplanationExpenseRow[];
-        const expenseIds = expenses.map((expense) => expense.id);
-        let splits: ExplanationSplitRow[] = [];
-        if (expenseIds.length > 0) {
-            const { data, error } = await supabaseClient
-                .from('expense_splits')
-                .select('expense_id,user_id,amount_owed')
-                .in('expense_id', expenseIds);
-            if (error) throw new Error(error.message);
-            splits = (data || []) as ExplanationSplitRow[];
+        // Stable ordering + exact counts avoid silently truncating large groups.
+        const [expenses, splits, priorPayments] = await Promise.all([
+            readAllPages<ExplanationExpenseRow>((from, to) => {
+                let query = supabaseClient.from('expenses')
+                    .select('id,item_name,category,created_at,added_by,amount', { count: 'exact' })
+                    .eq('group_id', groupId);
+                if (categoryFilter !== 'All') query = query.eq('category', categoryFilter);
+                return query.order('id').range(from, to);
+            }),
+            readAllPages<ExplanationSplitRow>((from, to) => {
+                let query = supabaseClient.from('expense_splits')
+                    .select('expense_id,user_id,amount_owed,expenses!inner(group_id,category)', { count: 'exact' })
+                    .eq('expenses.group_id', groupId);
+                if (categoryFilter !== 'All') query = query.eq('expenses.category', categoryFilter);
+                return query.order('id').range(from, to);
+            }),
+            categoryFilter === 'All'
+                ? readAllPages<SettlementBalanceRow>((from, to) => supabaseClient.from('settlements')
+                    .select('paid_by,paid_to,amount,settled_at,is_partial', { count: 'exact' })
+                    .eq('group_id', groupId).order('id').range(from, to))
+                : Promise.resolve([]),
+        ]);
+        const expenseIds = new Set(expenses.map((expense) => expense.id));
+        if (splits.some((split) => !expenseIds.has(split.expense_id))) {
+            throw new Error('The ledger changed while loading. Please refresh.');
         }
-
-        const priorPayments = categoryFilter === 'All'
-            ? (settlementData || []) as SettlementBalanceRow[]
-            : [];
         const calculation = calculateSettlementLedger(expenses, splits, priorPayments);
 
         return {
@@ -293,6 +253,8 @@ export const SettlementService = {
             splits,
             priorPayments,
             memberRows: calculation.members,
+            issues: calculation.issues,
+            directPayments: calculation.issues.length ? [] : calculation.directSettlements,
             suggestedPayments: calculation.settlements,
             totals: calculation.totals,
         };

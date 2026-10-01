@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, X, Loader2 } from 'lucide-react';
 
 interface ConfirmModalProps {

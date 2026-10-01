@@ -26,6 +26,7 @@ export interface LedgerMember {
 }
 
 export interface SettlementCalculation {
+  issues: string[];
   members: LedgerMember[];
   directSettlements: Array<{ from: string; to: string; amount: number }>;
   settlements: Array<{ from: string; to: string; amount: number }>;
@@ -42,10 +43,12 @@ const fromCents = (cents: number) => cents / 100;
 
 function toCents(value: string | number, label: string) {
   const amount = Number(value);
-  if (!Number.isFinite(amount) || amount < 0) {
+  if (!Number.isFinite(amount) || amount < 0 || String(value).trim() === '') {
     throw new Error(`${label} must be a valid non-negative amount`);
   }
-  return Math.round((amount + Number.EPSILON) * 100);
+  const cents = Math.round((amount + Number.EPSILON) * 100);
+  if (!Number.isSafeInteger(cents)) throw new Error(`${label} is outside the supported range`);
+  return cents;
 }
 
 /** Splits an expense exactly; remainder paise are spread one per member, payer first. */
@@ -121,6 +124,12 @@ export function calculateSettlementLedger(
   splits: LedgerSplit[],
   payments: LedgerPayment[],
 ): SettlementCalculation {
+  const issues: string[] = [];
+  const expenseShares = new Map<string, number>();
+  const splitKeys = new Set<string>();
+  if (new Set(expenses.map((expense) => expense.id)).size !== expenses.length) {
+    issues.push('Duplicate expenses were returned. Refresh the ledger.');
+  }
   const expenseIds = new Set(expenses.map((expense) => expense.id));
   const expensePayers = new Map(expenses.map((expense) => [expense.id, expense.added_by]));
   const ledger = new Map<string, { paid: number; assignedShare: number; paymentsMade: number; paymentsReceived: number }>();
@@ -154,10 +163,20 @@ export function calculateSettlementLedger(
   for (const split of splits) {
     if (!expenseIds.has(split.expense_id)) continue;
     const cents = toCents(split.amount_owed, `Split for expense ${split.expense_id}`);
+    const key = `${split.expense_id}:${split.user_id}`;
+    if (splitKeys.has(key)) issues.push(`Duplicate assigned share for expense ${split.expense_id}.`);
+    splitKeys.add(key);
+    expenseShares.set(split.expense_id, (expenseShares.get(split.expense_id) ?? 0) + cents);
     shareTotal += cents;
     ensureMember(split.user_id).assignedShare += cents;
     const payerId = expensePayers.get(split.expense_id);
     if (payerId) addPairDebt(split.user_id, payerId, cents);
+  }
+
+  for (const expense of expenses) {
+    if ((expenseShares.get(expense.id) ?? 0) !== toCents(expense.amount, 'Expense')) {
+      issues.push(`Expense ${expense.id} does not match its assigned shares. Refresh after saving or review this expense.`);
+    }
   }
 
   let paymentTotal = 0;
@@ -192,11 +211,12 @@ export function calculateSettlementLedger(
       ? { from: pair.left, to: pair.right, amount: fromCents(pair.leftOwesRight) }
       : { from: pair.right, to: pair.left, amount: fromCents(-pair.leftOwesRight) })
     .sort((a, b) => b.amount - a.amount || a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
-  const settlements = balanceChecksum === 0
+  const settlements = balanceChecksum === 0 && issues.length === 0
     ? minimizeNetBalances(Object.fromEntries(Object.entries(netCents).map(([userId, cents]) => [userId, fromCents(cents)])))
     : [];
 
   return {
+    issues,
     members,
     directSettlements,
     settlements,

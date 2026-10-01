@@ -26,12 +26,6 @@ interface GroupMemberRow {
     };
 }
 
-interface ExpenseChartRow {
-    added_by: string;
-    amount: string | number;
-    category: string;
-}
-
 interface ChartDatum {
     name: string;
     value: number;
@@ -57,6 +51,8 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const [partialAmount, setPartialAmount] = useState<string>('');
     const [showCalculationReport, setShowCalculationReport] = useState(false);
     const [calculationError, setCalculationError] = useState('');
+    const [loadedScope, setLoadedScope] = useState('');
+    const scope = `${groupId}:${category}`;
 
     const [chartData, setChartData] = useState<ChartDatum[]>([]);
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
@@ -76,25 +72,21 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
         try {
             const currentMembers = membersRef.current;
-            setCalculationError('');
-            // 1. Chart Data: "Who paid what" total
-            let expQuery = `group_id=eq.${groupId}&select=added_by,amount,category`;
-            if (category !== 'All') expQuery += `&category=eq.${category}`;
-            const expenses = await dbQuery('expenses', expQuery);
 
+            const report = await SettlementService.getCalculationExplanation(groupId, category);
+            if (report.issues.length) throw new Error(report.issues[0]);
             const userTotals: Record<string, number> = {};
             const catTotals: Record<string, number> = {};
-
-            if (expenses) {
-                (expenses as unknown as ExpenseChartRow[]).forEach((e) => {
-                    userTotals[e.added_by] = (userTotals[e.added_by] || 0) + Number(e.amount);
-                    catTotals[e.category] = (catTotals[e.category] || 0) + Number(e.amount);
-                });
+            for (const expense of report.expenses) {
+                const cents = Math.round(Number(expense.amount) * 100);
+                userTotals[expense.added_by] = (userTotals[expense.added_by] ?? 0) + cents;
+                const expenseCategory = expense.category || 'General';
+                catTotals[expenseCategory] = (catTotals[expenseCategory] ?? 0) + cents;
             }
-
-            // 2. Settlement Data: "How to settle up"
-            const calcSettlements = await SettlementService.calculateGroupSettlements(groupId, currentMembers, category);
-            const minimized = SettlementService.calculateMinimizedSettlements(calcSettlements);
+            for (const id of Object.keys(userTotals)) userTotals[id] /= 100;
+            for (const key of Object.keys(catTotals)) catTotals[key] /= 100;
+            const calcSettlements = report.directPayments;
+            const minimized = report.suggestedPayments;
 
             // 3. Fallback users for removed members
             const missingIds = new Set<string>();
@@ -132,6 +124,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             }).filter((d) => d.value > 0);
 
             if (requestId !== requestIdRef.current) return;
+            setCalculationError('');
             setFallbackUsers(fMap);
             setChartData(cData);
             setCategoryTotals(catTotals);
@@ -141,17 +134,24 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
         } catch (err) {
             if (requestId !== requestIdRef.current) return;
             console.error('Failed to load balance data', err);
+            setChartData([]);
+            setCategoryTotals({});
             setSettlements([]);
             setMinimizedSettlements([]);
             setCalculationError(err instanceof Error ? err.message : 'Could not calculate this group balance');
         } finally {
-            if (requestId === requestIdRef.current) setLoading(false);
+            if (requestId === requestIdRef.current) {
+                setLoadedScope(`${groupId}:${category}`);
+                setLoading(false);
+            }
         }
     }, [groupId, category]);
 
     // Fix 4: re-fetch on group/category switch
     useEffect(() => {
-        fetchBalanceData();
+        setSettlingCard(null);
+        void fetchBalanceData();
+        return () => { requestIdRef.current += 1; };
     }, [fetchBalanceData]);
 
     // Realtime updates replace the data in place without remounting the page.
@@ -177,7 +177,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
         if (user.id !== to) return;
 
         const key = `${from}__${to}`;
-        if (settling === key) return;
+        if (settling || calculationError) return;
         setSettling(key);
 
         try {
@@ -210,7 +210,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
         const remaining = Math.max(0, fullAmount - enteredNum);
         const isSettlingNow = settling === key;
         const isFullPayment = enteredNum >= fullAmount - 0.009;
-        const isValid = enteredNum >= 1 && enteredNum <= fullAmount + 0.001;
+        const isValid = enteredNum >= 0.01 && enteredNum <= fullAmount + 0.001;
 
         const hint = isFullPayment
             ? 'Full settlement — balance cleared ✅'
@@ -230,7 +230,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                         <input
                             id={`partial-input-${key}`}
                             type="number"
-                            min="1"
+                            min="0.01"
                             max={fullAmount}
                             step="0.01"
                             value={partialAmount}
@@ -300,7 +300,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
 
     const closeCalculationReport = useCallback(() => setShowCalculationReport(false), []);
 
-    if (loading) {
+    if (loading || (groupId && loadedScope !== scope)) {
         return <div className="flex h-[80vh] items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
     }
 
@@ -317,6 +317,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                 <div>
                     <p className="app-label mb-3">Group settlement calculator</p>
                     <h1 className="app-title">Balances</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">{groupName} · All-time balances, including recorded payments</p>
                 </div>
                 <button
                     id="open-calculation-report"
@@ -350,7 +351,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(value: number | undefined) => `₹${(value ?? 0).toFixed(0)}`}
+                                    formatter={(value: number | undefined) => `₹${(value ?? 0).toFixed(2)}`}
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
@@ -378,7 +379,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                 </div>
                                 <div>
                                     <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{cat}</p>
-                                    <p className="font-extrabold text-white">₹{total.toFixed(0)}</p>
+                                    <p className="font-extrabold text-white">₹{total.toFixed(2)}</p>
                                 </div>
                             </div>
                         );
@@ -421,7 +422,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <div>
                         <h2 className="text-lg font-bold text-white leading-tight">How to Settle Up</h2>
-                        <p className="text-[11px] text-muted-foreground leading-tight">Minimum transactions to clear debts</p>
+                        <p className="text-[11px] text-muted-foreground leading-tight">Recommended payments · same plan as All groups</p>
                     </div>
                 </div>
             </div>
@@ -526,7 +527,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <div>
                         <h2 className="text-lg font-bold text-white leading-tight">Full Balance Breakdown</h2>
-                        <p className="text-[11px] text-muted-foreground leading-tight">Every individual debt pair</p>
+                        <p className="text-[11px] text-muted-foreground leading-tight">Reference only: direct expense debts before simplifying. Do not pay both lists.</p>
                     </div>
                 </div>
             </div>
@@ -561,44 +562,10 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                                         <div className="text-right">
                                             <span className="block font-bold text-white">₹{s.amount.toFixed(2)}</span>
                                         </div>
-                                        {(() => {
-                                            const settlingKey = `${s.from}__${s.to}`;
-                                            const isCreditor = user?.id === s.to;   // person who is owed — confirms receipt
-                                            const isDebtor   = user?.id === s.from; // person who owes — waits for confirmation
-                                            const isSettlingNow = settling === settlingKey;
-                                            const isCardSettling = settlingCard === settlingKey;
 
-                                            if (isCreditor && category === 'All') {
-                                                // If modal is open for this card, hide the button
-                                                if (isCardSettling) return null;
-                                                return (
-                                                    <button
-                                                        id={`settle-btn-full-${settlingKey}`}
-                                                        onClick={() => openSettleModal(s.from, s.to, s.amount)}
-                                                        disabled={isSettlingNow}
-                                                        className="accent-button text-xs font-bold px-3 py-2 rounded-lg"
-                                                    >
-                                                        Settle
-                                                    </button>
-                                                );
-                                            }
-                                            if (isDebtor && category === 'All') {
-                                                return (
-                                                    <div className="text-[10px] text-muted-foreground italic max-w-[80px] leading-tight text-center">
-                                                        Pending payment...
-                                                    </div>
-                                                );
-                                            }
-                                            return <div className="px-3 py-2" />;
-                                        })()}
                                     </div>
 
                                 </div>
-
-                                {/* Inline partial-payment modal (full breakdown section) */}
-                                {category === 'All' && settlingCard === `${s.from}__${s.to}` && user?.id === s.to &&
-                                    renderSettleModal(s.from, s.to, s.amount)
-                                }
 
                                 <div className="mt-3 text-sm text-muted-foreground text-center">
                                     <span className={fromMe ? 'font-bold text-white' : ''}>

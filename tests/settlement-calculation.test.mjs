@@ -246,6 +246,31 @@ test('multiple payers are netted once without double counting self shares', () =
   ]);
 });
 
+test('canonical plan nets a member\'s debit and credit instead of showing conflicting gross payments', () => {
+  const result = calculation.calculateSettlementLedger(
+    [
+      { id: 'one', added_by: 'b', amount: 40 },
+      { id: 'two', added_by: 'me', amount: 20 },
+    ],
+    [
+      { expense_id: 'one', user_id: 'me', amount_owed: 20 },
+      { expense_id: 'one', user_id: 'b', amount_owed: 20 },
+      { expense_id: 'two', user_id: 'me', amount_owed: 10 },
+      { expense_id: 'two', user_id: 'c', amount_owed: 10 },
+    ],
+    [],
+  );
+
+  assert.deepEqual(result.directSettlements, [
+    { from: 'me', to: 'b', amount: 20 },
+    { from: 'c', to: 'me', amount: 10 },
+  ]);
+  assert.deepEqual(result.settlements, [
+    { from: 'c', to: 'b', amount: 10 },
+    { from: 'me', to: 'b', amount: 10 },
+  ]);
+});
+
 test('numeric strings from persisted rows calculate identically to numbers', () => {
   const result = calculation.calculateSettlementLedger(
     [{ id: 'bill', added_by: 'danish', amount: '100.00' }],

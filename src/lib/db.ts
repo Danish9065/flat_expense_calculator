@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { readAllPages } from './pagination';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -105,9 +106,19 @@ function applyFilters<T extends QueryBuilder>(query: T, filters: { key: string; 
   return filtered as T;
 }
 
-export async function dbQuery(table: string, params = '') {
+export async function dbQuery(table: string, params = ''): Promise<unknown[] | undefined> {
   return executeWithRetry(async () => {
     const { filters, selectVal, orderCol, orderAsc } = parseParams(params);
+    if (table === 'expenses') {
+      const data = await readAllPages((from, to) => {
+        let page = supabaseClient.from(table).select(selectVal, { count: 'exact' });
+        page = applyFilters(page as unknown as QueryBuilder, filters) as unknown as typeof page;
+        if (orderCol) page = page.order(orderCol, { ascending: orderAsc });
+        if (orderCol !== 'id') page = page.order('id');
+        return page.range(from, to);
+      });
+      return { data, error: null };
+    }
     let query = supabaseClient.from(table).select(selectVal);
     query = applyFilters(query as unknown as QueryBuilder, filters) as unknown as typeof query;
     if (orderCol) query = query.order(orderCol, { ascending: orderAsc });
@@ -119,7 +130,7 @@ export async function dbInsert(table: string, body: object) {
   return executeWithRetry(async () => supabaseClient.from(table).insert(body).select('*'));
 }
 
-export async function dbUpdate(table: string, params: string, body: object) {
+export async function dbUpdate(table: string, params: string, body: object): Promise<unknown[] | undefined> {
   return executeWithRetry(async () => {
     const { filters, selectVal } = parseParams(params);
     let query = supabaseClient.from(table).update(body);

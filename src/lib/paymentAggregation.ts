@@ -21,7 +21,7 @@ export interface ConsolidatedPayment {
 }
 
 /**
- * Combines direct per-person balances across groups for display and payment.
+ * Combines canonical per-group payments across groups for display and payment.
  * Opposite directions remain separate so each source group can be confirmed
  * accurately without inventing a cross-group settlement record.
  */
@@ -79,4 +79,20 @@ export function aggregateUserPayments(sources: GroupSettlementSource[], userId: 
       if (a.direction !== b.direction) return a.direction === 'pay' ? -1 : 1;
       return b.total - a.total;
     });
+}
+
+/** Adds the displayed payment cards in integer paise. */
+export function summarizeUserPayments(payments: ConsolidatedPayment[]) {
+  const cents = payments.reduce((result, payment) => {
+    const amountCents = Math.round(payment.total * 100);
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return result;
+    if (payment.direction === 'pay') result.toPay += amountCents;
+    else result.toReceive += amountCents;
+    return result;
+  }, { toPay: 0, toReceive: 0 });
+
+  return {
+    toPay: cents.toPay / 100,
+    toReceive: cents.toReceive / 100,
+  };
 }

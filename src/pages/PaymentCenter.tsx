@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { useToast } from '../context/ToastContext';
 import { dbQuery } from '../lib/db';
-import { aggregateUserPayments, type ConsolidatedPayment, type GroupSettlementSource } from '../lib/paymentAggregation';
+import { aggregateUserPayments, summarizeUserPayments, type ConsolidatedPayment, type GroupSettlementSource } from '../lib/paymentAggregation';
 import { SettlementService } from '../services/settlementService';
 import PaymentActions from '../components/PaymentActions';
 import { notifyGroupDataChanged, useAllGroupsRealtimeSync } from '../hooks/useRealtimeSync';
@@ -32,11 +32,14 @@ export default function PaymentCenter() {
   const [profiles, setProfiles] = useState<Record<string, ProfileSummary>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [loadedScope, setLoadedScope] = useState('');
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const groupList = useMemo(() => (groups || []) as GroupSummary[], [groups]);
+  const scope = `${user?.id}:${groupList.map((group) => group.id).sort().join(',')}`;
 
   const loadAllPayments = useCallback(async () => {
     if (!user || groupLoading) return;
@@ -68,17 +71,22 @@ export default function PaymentCenter() {
       }
 
       if (requestId === requestIdRef.current) {
+        setLoadError('');
+        setLoadedScope(scope);
         setProfiles(profileMap);
         setPayments(consolidated);
       }
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       console.error('Failed to load all-group payments', error);
+      setLoadError(error instanceof Error ? error.message : 'Payment calculation unavailable');
+      setLoadedScope(scope);
+      setConfirmingKey(null);
       showError('Could not load all group payments. Please try again.');
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [groupList, groupLoading, showError, user]);
+  }, [groupList, groupLoading, showError, user, scope]);
 
   const refreshAllPayments = useCallback(async () => {
     if (refreshing) return;
@@ -92,6 +100,7 @@ export default function PaymentCenter() {
 
   useEffect(() => {
     if (view === 'all') void loadAllPayments();
+    return () => { requestIdRef.current += 1; };
   }, [loadAllPayments, view]);
 
   useAllGroupsRealtimeSync(
@@ -105,14 +114,10 @@ export default function PaymentCenter() {
     return () => window.removeEventListener('settle-complete', refresh);
   }, [loadAllPayments]);
 
-  const totals = useMemo(() => payments.reduce((result, payment) => {
-    if (payment.direction === 'pay') result.toPay += payment.total;
-    else result.toReceive += payment.total;
-    return result;
-  }, { toPay: 0, toReceive: 0 }), [payments]);
+  const totals = useMemo(() => summarizeUserPayments(payments), [payments]);
 
   const confirmAllReceived = async (payment: ConsolidatedPayment) => {
-    if (payment.direction !== 'receive' || recordingKey) return;
+    if (payment.direction !== 'receive' || recordingKey || loadError || loadedScope !== scope) return;
     setRecordingKey(payment.key);
     try {
       await SettlementService.settleMultiple(payment.allocations);
@@ -153,12 +158,19 @@ export default function PaymentCenter() {
         <button type="button" role="tab" aria-selected={view === 'group'} onClick={() => setView('group')} className={`min-h-11 rounded-xl px-3 text-sm font-bold transition-colors ${view === 'group' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-white'}`}>Group details</button>
       </div>
 
-      {groupError && groupList.length === 0 ? (
+      {groupError ? (
         <div className="app-panel mx-auto max-w-md p-6 text-center"><h2 className="text-lg font-bold text-white">We couldn't load your groups</h2><p className="mt-2 text-sm text-muted-foreground">Your payment data is safe. Check your connection and try again.</p><button type="button" onClick={() => void refreshGroup()} className="accent-button mt-5 min-h-11 rounded-xl px-5 font-bold">Try again</button></div>
       ) : view === 'group' ? (
         <Suspense fallback={<div className="grid min-h-64 place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}><Balance embedded /></Suspense>
-      ) : loading || groupLoading ? (
+      ) : loading || groupLoading || loadedScope !== scope ? (
         <div className="grid min-h-[50vh] place-items-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+      ) : loadError ? (
+        <div role="alert" className="app-panel p-6 text-center">
+          <h2 className="text-lg font-bold text-white">Payment calculation unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{loadError}</p>
+          <p className="mt-2 text-sm text-muted-foreground">No payment status can be confirmed until every group loads successfully.</p>
+          <button type="button" onClick={() => void refreshAllPayments()} disabled={refreshing} className="accent-button mt-4 rounded-xl px-5 py-3">Retry</button>
+        </div>
       ) : (
         <>
           <div role="note" className="mb-6 rounded-2xl border border-amber-300/25 bg-amber-300/[0.07] p-4 text-sm leading-relaxed text-amber-100/90">
@@ -177,7 +189,7 @@ export default function PaymentCenter() {
           </div>
 
           <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/[0.06] p-4 text-sm leading-relaxed text-muted-foreground">
-            <strong className="text-white">One payment per person.</strong> Amounts owed to the same person are combined across groups. Different recipients require separate UPI transactions because each UPI payment has one payee.
+            <strong className="text-white">All-time recommended payments.</strong> These match each group's “How to Settle Up” plan and include recorded payments. Amounts to the same person are combined; opposite directions stay separate for accurate group records.
           </div>
 
           {payments.length === 0 ? (
@@ -208,7 +220,7 @@ export default function PaymentCenter() {
                       <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
                         {payment.allocations.map((allocation) => <div key={`${allocation.groupId}:${allocation.debtorId}:${allocation.creditorId}`} className="flex items-center justify-between gap-3 text-sm"><span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground"><Users className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{allocation.groupName}</span></span><strong className="shrink-0 text-white">₹{allocation.amount.toFixed(2)}</strong></div>)}
                         <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm"><span className="font-bold text-white">{isPaying ? 'Your combined payment' : 'Combined amount to you'}</span><strong className="text-primary">₹{payment.total.toFixed(2)}</strong></div>
-                        <p className="text-[11px] leading-relaxed text-muted-foreground">Each line is the direct amount between you and this person in that group—not their total group balance. They may separately owe or receive money from another group member.</p>
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">Each line is the same recommended payment shown in that group's “How to Settle Up” section. Adding these group lines exactly matches the combined amount above.</p>
                       </div>
                     </details>
 

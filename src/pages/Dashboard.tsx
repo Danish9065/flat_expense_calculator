@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { dbQuery, dbDelete } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
-import { format, isThisMonth } from 'date-fns';
+import { format } from 'date-fns';
 import { Plus, Edit2, Trash2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import ExpenseModal from '../components/ExpenseModal';
 import { useToast } from '../context/ToastContext';
@@ -13,6 +13,8 @@ import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSyn
 import SecureStorageLink from '../components/SecureStorageLink';
 import SecureStorageImage from '../components/SecureStorageImage';
 import { deleteStorageReference } from '../lib/storage';
+
+import { expenseMonth, monthlySummary } from '../lib/monthlySummary';
 
 interface ExpenseSplitRow {
     user_id: string;
@@ -68,12 +70,19 @@ export default function Dashboard() {
 
     const [balances, setBalances] = useState({ totalPaid: 0, totalOwed: 0, netBalance: 0 });
 
+    const requestIdRef = useRef(0);
+    const [loadError, setLoadError] = useState('');
+    const [loadedScope, setLoadedScope] = useState('');
+    const scope = `${groupId}:${user?.id}`;
+    const [selectedMonth, setSelectedMonth] = useState(() => expenseMonth(new Date()));
+
     // Greeting
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     const name = user?.full_name?.split(' ')[0] || 'Member';
 
     const fetchInitialData = useCallback(async (silent = false) => {
+        const requestId = ++requestIdRef.current;
         if (!groupId || !user) {
             setLoading(false);
             return;
@@ -86,27 +95,31 @@ export default function Dashboard() {
         }
 
         try {
-            // Fetch expenses
-            const expData = await dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed,users(full_name))`);
-
-            if (expData) {
-                setExpenses(expData as ExpenseRow[]);
-            }
-
-            // Fetch Balances
-            const bals = await SettlementService.calculateBalance(groupId, user.id);
+            const [expData, bals] = await Promise.all([
+                dbQuery('expenses', `group_id=eq.${groupId}&order=created_at.desc&select=*,users(full_name),expense_splits(user_id,amount_owed,users(full_name))`),
+                SettlementService.calculateBalance(groupId, user.id),
+            ]);
+            if (requestId !== requestIdRef.current) return;
+            setExpenses((expData ?? []) as unknown as ExpenseRow[]);
             setBalances(bals);
+            setLoadError('');
         } catch (err) {
+            if (requestId !== requestIdRef.current) return;
+            setLoadError(err instanceof Error ? err.message : 'Could not load the dashboard');
             console.error('Failed to load dashboard data', err);
         } finally {
-            setLoading(false);
-            setIsRefreshing(false);
+            if (requestId === requestIdRef.current) {
+                setLoadedScope(`${groupId}:${user?.id}`);
+                setLoading(false);
+                setIsRefreshing(false);
+            }
         }
     }, [groupId, user]);
 
     // Fix 4: re-fetch on group/user switch
     useEffect(() => {
-        fetchInitialData();
+        void fetchInitialData();
+        return () => { requestIdRef.current += 1; };
     }, [fetchInitialData]);
 
     // Fix 1: InsForge Realtime — silent re-fetch when any group member writes data
@@ -114,16 +127,10 @@ export default function Dashboard() {
 
     // Re-fetch balance whenever Balance.tsx fires a settle-complete event
     useEffect(() => {
-        const onSettle = () => {
-            if (groupId && user) {
-                SettlementService.calculateBalance(groupId, user.id)
-                    .then(bals => setBalances(bals))
-                    .catch(err => console.error('Failed to refresh balance after settle', err));
-            }
-        };
+        const onSettle = () => { void fetchInitialData(true); };
         window.addEventListener('settle-complete', onSettle);
         return () => window.removeEventListener('settle-complete', onSettle);
-    }, [groupId, user]);
+    }, [fetchInitialData]);
 
     const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
@@ -163,35 +170,19 @@ export default function Dashboard() {
         // Compare with total group members count
         if (splitEntries.length >= members.length && members.length > 0) {
             // Check if all active members are in the split
-            const allActiveIncluded = members.every(m => splitEntries.some(s => s.user_id === m.user_id));
+            const allActiveIncluded = (members as GroupMemberRow[]).every(m => splitEntries.some(s => s.user_id === m.user_id));
             if (allActiveIncluded && splitEntries.length === members.length) return 'All';
         }
         return splitEntries.map((s) => getMemberName(s.user_id, s.users?.full_name)).join(', ');
     };
 
-    // Stats calculation
-    const currentMonthExpenses = expenses.filter(e => e.created_at && isThisMonth(new Date(e.created_at)));
-    const totalThisMonth = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-    // Exact Share Calculation
-    let exactYourShare = 0;
-
-
-    currentMonthExpenses.forEach(expense => {
-        // Find the split for the current logged-in user
-        const userSplit = expense.expense_splits?.find((s) => s.user_id === user?.id);
-        const splitAmount = userSplit && userSplit.amount_owed ? Number(userSplit.amount_owed) : 0;
-
-        exactYourShare += splitAmount;
-
-        // Log the exact cut for mathematical auditing
-
-    });
-
-
+    const monthSummary = monthlySummary(expenses, user?.id ?? '', selectedMonth);
+    const totalThisMonth = monthSummary.total;
+    const exactYourShare = monthSummary.share;
 
     const filteredExpenses = expenses.filter(e => filterMode === 'all' || e.category === filterMode);
 
-    if (groupLoading) {
+    if (groupLoading || (groupId && loadedScope !== scope)) {
         return <div className="grid min-h-[70vh] place-items-center"><RefreshCw className="h-8 w-8 animate-spin text-primary" /></div>;
     }
 
@@ -206,6 +197,14 @@ export default function Dashboard() {
             </div>
         );
     }
+
+    if (loadError) return (
+        <div role="alert" className="app-section py-12 text-center">
+            <h1 className="text-xl font-bold">Dashboard unavailable</h1>
+            <p className="mt-3 text-muted-foreground">{loadError}</p>
+            <button onClick={() => void fetchInitialData()} className="accent-button mt-4 rounded-xl px-5 py-3">Retry</button>
+        </div>
+    );
 
     return (
         <div className="app-section pb-28 min-h-screen">
@@ -226,7 +225,8 @@ export default function Dashboard() {
             {/* Summary Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-0 mb-8 app-panel overflow-hidden">
                 <div className="bg-card p-6 lg:p-8 border-b md:border-b-0 md:border-r border-[#1E1E1E]">
-                    <p className="app-label mb-3">Total This Month</p>
+                    <label className="app-label mb-3 block" htmlFor="expense-month">Spending by entry month (IST)</label>
+                    <input id="expense-month" type="month" value={selectedMonth} onChange={(event) => { if (event.target.value) setSelectedMonth(event.target.value); }} className="dark-input mb-3 rounded-lg px-3 py-2" />
                     <p className="text-4xl font-bold text-white">₹{totalThisMonth.toFixed(2)}</p>
                     <p className="text-sm text-muted-foreground mt-3">Your share: <span className="text-primary font-semibold">₹{exactYourShare.toFixed(2)}</span></p>
                 </div>
@@ -235,7 +235,7 @@ export default function Dashboard() {
                     : 'bg-primary/10'
                     }`}>
                     <p className={`app-label mb-3 ${balances.netBalance >= 0 ? '!text-green-300' : '!text-primary'}`}>
-                        Net Balance
+                        Net Balance · All time
                     </p>
                     <div className="flex items-center">
                         {balances.netBalance >= 0 ? <ArrowUpRight className="w-7 h-7 text-green-300 mr-2" /> : <ArrowDownRight className="w-7 h-7 text-primary mr-2" />}
@@ -363,7 +363,7 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                 <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 overflow-hidden">
                         {(() => {
-                            const mapEntry = CATEGORY_MAP[expense.category] || CATEGORY_MAP['General'];
+                            const mapEntry = CATEGORY_MAP[expense.category || 'General'] || CATEGORY_MAP['General'];
                             const Icon = mapEntry.icon;
                             return (
                                 <div className={`p-3 rounded-full flex-shrink-0 ${mapEntry.colorClass}`}>
@@ -380,7 +380,7 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex items-center space-x-3">
-                        <span className="font-extrabold text-white text-lg">₹{Number(expense.amount).toFixed(0)}</span>
+                        <span className="font-extrabold text-white text-lg">₹{Number(expense.amount).toFixed(2)}</span>
                         {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
                     </div>
                 </div>

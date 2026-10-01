@@ -95,7 +95,7 @@ export default function CalculationReport({
   }, [report]);
   const maxPaid = Math.max(1, ...(report?.memberRows.map((row) => row.paid) || [1]));
   const isVerified = report
-    ? Math.abs(report.totals.balanceChecksum) < 0.01 && Math.abs(report.totals.splitDifference) < 0.01
+    ? report.issues.length === 0 && report.totals.balanceChecksum === 0 && report.totals.splitDifference === 0
     : false;
 
   const handlePrint = () => {
@@ -153,7 +153,7 @@ export default function CalculationReport({
                 </h1>
                 <div className="mt-6 flex flex-wrap gap-x-8 gap-y-2 text-sm text-[#59665f]">
                   <span><strong className="text-[#17221d]">Group:</strong> {groupName || 'Current group'}</span>
-                  <span><strong className="text-[#17221d]">View:</strong> {category === 'All' ? 'All categories' : category}</span>
+                  <span><strong className="text-[#17221d]">View:</strong> All time · {category === 'All' ? 'All categories' : category}</span>
                   <span><strong className="text-[#17221d]">Created:</strong> {new Date(report.generatedAt).toLocaleString()}</span>
                 </div>
               </header>
@@ -168,7 +168,7 @@ export default function CalculationReport({
                     <p className="mt-1 text-sm leading-6 text-[#59665f]">
                       {isVerified
                         ? `Expenses and assigned shares match, and all member balances add back to ${money(0)}.`
-                        : `Expenses differ from assigned shares by ${money(report.totals.splitDifference)}. Review the detailed rows below.`}
+                        : `${report.issues.join(' ')} Review the detailed rows below. Payments are unavailable until the ledger is complete.`}
                     </p>
                   </div>
                 </div>
