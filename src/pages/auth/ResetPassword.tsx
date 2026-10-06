@@ -3,6 +3,14 @@ import { supabaseClient } from '../../lib/db';
 import { useNavigate, Link } from 'react-router-dom';
 import { Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import {
+    clearPasswordRecoverySession,
+    hasActivePasswordRecoverySession,
+    hasPasswordRecoveryParams,
+    markPasswordRecoverySession,
+} from '../../lib/passwordRecovery';
+
+type RecoveryState = 'checking' | 'ready' | 'invalid';
 
 export default function ResetPassword() {
     const navigate = useNavigate();
@@ -13,17 +21,43 @@ export default function ResetPassword() {
     const [showNew, setShowNew] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [sessionReady, setSessionReady] = useState(false);
+    const [recoveryState, setRecoveryState] = useState<RecoveryState>('checking');
 
     useEffect(() => {
         let active = true;
-        void supabaseClient.auth.getSession().then(({ data }) => {
-            if (!active) return;
-            if (data.session) setSessionReady(true);
-            else navigate('/forgot-password', { replace: true });
+        const openedFromRecoveryLink = hasPasswordRecoveryParams(window.location);
+        const authCode = new URLSearchParams(window.location.search).get('code');
+        if (openedFromRecoveryLink) markPasswordRecoverySession();
+
+        const { data: listener } = supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (!active || event !== 'PASSWORD_RECOVERY' || !session) return;
+            markPasswordRecoverySession();
+            setRecoveryState('ready');
         });
-        return () => { active = false; };
-    }, [navigate]);
+
+        const prepareRecoverySession = async () => {
+            let { data, error } = await supabaseClient.auth.getSession();
+
+            if (!data.session && authCode) {
+                const exchangeResult = await supabaseClient.auth.exchangeCodeForSession(authCode);
+                error = exchangeResult.error;
+                data = { session: exchangeResult.data.session };
+            }
+
+            if (!active) return;
+            if (!error && data.session && (openedFromRecoveryLink || hasActivePasswordRecoverySession())) {
+                setRecoveryState('ready');
+                return;
+            }
+            setRecoveryState('invalid');
+        };
+
+        void prepareRecoverySession();
+        return () => {
+            active = false;
+            listener.subscription.unsubscribe();
+        };
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -45,14 +79,46 @@ export default function ResetPassword() {
             if (error) throw new Error(error.message || 'Failed to reset password');
 
             success('Password reset successfully! Please log in.');
+            clearPasswordRecoverySession();
             await supabaseClient.auth.signOut({ scope: 'local' });
-            navigate('/login');
+            navigate('/login', { replace: true });
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');
         } finally {
             setLoading(false);
         }
     };
+
+    if (recoveryState === 'checking') {
+        return (
+            <div className="auth-shell">
+                <div className="auth-card-wrap">
+                    <div className="auth-card flex items-center justify-center gap-3 text-sm text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        Verifying your secure reset link…
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (recoveryState === 'invalid') {
+        return (
+            <div className="auth-shell">
+                <div className="auth-header">
+                    <div className="auth-mark"><Lock className="h-7 w-7" /></div>
+                    <h2 className="auth-heading">Reset link expired</h2>
+                    <p className="auth-copy">This password reset link is invalid or has expired.</p>
+                </div>
+                <div className="auth-card-wrap">
+                    <div className="auth-card space-y-4 text-center">
+                        <Link to="/forgot-password" className="auth-submit">Request a new reset link</Link>
+                        <Link to="/login" className="auth-secondary-action">Back to login</Link>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="auth-shell">
@@ -71,7 +137,7 @@ export default function ResetPassword() {
                     <form className="space-y-6" onSubmit={handleSubmit}>
                         {/* New Password */}
                         <div>
-                            <label className="auth-label">
+                            <label className="auth-label" htmlFor="new-password">
                                 New Password
                             </label>
                             <div className="mt-2 relative">
@@ -79,12 +145,14 @@ export default function ResetPassword() {
                                     <Lock className="h-5 w-5" />
                                 </div>
                                 <input
+                                    id="new-password"
                                     required
                                     type={showNew ? 'text' : 'password'}
                                     value={newPassword}
                                     onChange={e => setNewPassword(e.target.value)}
                                     className="auth-field pr-10"
                                     placeholder="Minimum 6 characters"
+                                    autoComplete="new-password"
                                 />
                                 <button
                                     type="button"
@@ -98,7 +166,7 @@ export default function ResetPassword() {
 
                         {/* Confirm Password */}
                         <div>
-                            <label className="auth-label">
+                            <label className="auth-label" htmlFor="confirm-new-password">
                                 Confirm Password
                             </label>
                             <div className="mt-2 relative">
@@ -106,12 +174,14 @@ export default function ResetPassword() {
                                     <Lock className="h-5 w-5" />
                                 </div>
                                 <input
+                                    id="confirm-new-password"
                                     required
                                     type={showConfirm ? 'text' : 'password'}
                                     value={confirmPassword}
                                     onChange={e => setConfirmPassword(e.target.value)}
                                     className="auth-field pr-10"
                                     placeholder="Repeat your password"
+                                    autoComplete="new-password"
                                 />
                                 <button
                                     type="button"
@@ -129,7 +199,7 @@ export default function ResetPassword() {
                         <div>
                             <button
                             type="submit"
-                            disabled={!sessionReady || loading || !newPassword || !confirmPassword}
+                            disabled={loading || !newPassword || !confirmPassword}
                                 className="auth-submit"
                             >
                                 {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Reset Password'}

@@ -22,10 +22,11 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      await signIn(email, password);
+      await signIn(email.trim().toLowerCase(), password);
       success(`Welcome back! 👋`);
-    } catch {
-      showError('Invalid email or password');
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Unable to sign in. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -48,33 +49,36 @@ export default function Login() {
         <div className="auth-card">
           <form className="space-y-6" onSubmit={handleLogin}>
             <div>
-              <label className="auth-label">Email address</label>
+              <label className="auth-label" htmlFor="login-email">Email address</label>
               <div className="mt-2 relative">
                 <div className="auth-field-icon">
                   <Mail className="h-5 w-5" />
                 </div>
                 <input
-                  required type="email" value={email}
+                  id="login-email" required type="email" value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="auth-field"
                   placeholder="you@example.com"
+                  autoComplete="email"
+                  inputMode="email"
                 />
               </div>
             </div>
             <div>
-              <div className="flex items-center justify-between">
-                <label className="auth-label">Password</label>
-                <Link to="/forgot-password" className="text-sm font-medium text-primary hover:text-primary/80">Forgot password?</Link>
+              <div className="flex items-center justify-between gap-3">
+                <label className="auth-label" htmlFor="login-password">Password</label>
+                <Link to="/forgot-password" className="shrink-0 text-xs sm:text-sm font-medium text-primary hover:text-primary/80">Forgot password?</Link>
               </div>
               <div className="mt-2 relative">
                 <div className="auth-field-icon">
                   <Lock className="h-5 w-5" />
                 </div>
                 <input
-                  required type="password" value={password}
+                  id="login-password" required type="password" value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="auth-field"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                 />
               </div>
             </div>

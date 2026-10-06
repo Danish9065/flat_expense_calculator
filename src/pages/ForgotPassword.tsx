@@ -16,7 +16,7 @@ export default function ForgotPassword() {
         setLoading(true);
 
         try {
-            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
                 redirectTo: `${window.location.origin}/reset-password`,
             });
 
@@ -52,18 +52,21 @@ export default function ForgotPassword() {
                 <div className="auth-card">
                     <form className="space-y-6" onSubmit={handleReset}>
                         <div>
-                            <label className="auth-label">Email address</label>
+                            <label className="auth-label" htmlFor="recovery-email">Email address</label>
                             <div className="mt-2 relative">
                                 <div className="auth-field-icon">
                                     <Mail className="h-5 w-5" />
                                 </div>
                                 <input
+                                    id="recovery-email"
                                     required
                                     type="email"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     className="auth-field"
                                     placeholder="you@example.com"
+                                    autoComplete="email"
+                                    inputMode="email"
                                 />
                             </div>
                         </div>

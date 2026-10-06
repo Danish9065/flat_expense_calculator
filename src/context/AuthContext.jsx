@@ -4,12 +4,21 @@ import {
   clearPersistentSession,
   writePersistentSession,
 } from '../lib/authSession';
+import { markPasswordRecoverySession } from '../lib/passwordRecovery';
 
 const AuthContext = createContext(null);
 
 async function provisionProfileFromMetadata(authUser) {
   const metadata = authUser.user_metadata || {};
   if (!metadata.full_name) return null;
+
+  if (metadata.invite_key) {
+    const { error } = await supabaseClient.rpc('consume_invite_key', {
+      key_code_param: metadata.invite_key,
+      target_user_id: authUser.id,
+    });
+    if (error) throw error;
+  }
 
   const { data: profile, error: profileError } = await supabaseClient
     .from('users')
@@ -34,16 +43,6 @@ async function provisionProfileFromMetadata(authUser) {
     if (error) throw error;
   }
 
-  if (metadata.invite_key) {
-    const { error } = await supabaseClient.rpc('consume_invite_key', {
-      key_code_param: metadata.invite_key,
-      target_user_id: authUser.id,
-    });
-    // Provisioning is idempotent: a previously consumed key means this step
-    // already completed on another tab/device.
-    if (error && !/already used|invalid/i.test(error.message)) throw error;
-  }
-
   return profile;
 }
 
@@ -56,6 +55,7 @@ async function hydrateAppUser(authUser) {
 
   if (error) throw error;
   if (!profile) profile = await provisionProfileFromMetadata(authUser);
+  if (!profile) throw new Error('Your account setup is incomplete. Please contact an administrator.');
 
   const hydratedUser = {
     ...authUser,
@@ -109,6 +109,7 @@ export function AuthProvider({ children }) {
       .finally(() => { if (active) setLoading(false); });
 
     const { data: listener } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') markPasswordRecoverySession();
       // Defer database work until the auth callback releases its internal lock.
       window.setTimeout(() => {
         if (event === 'SIGNED_OUT') {
@@ -149,13 +150,22 @@ export function AuthProvider({ children }) {
   const signIn = async (email, password) => {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error || !data.user || !data.session) {
-      throw new Error(error?.message || 'Invalid email or password');
+      if (error?.code === 'invalid_credentials') throw new Error('Incorrect email or password.');
+      if (error?.code === 'email_not_confirmed') throw new Error('Please verify your email before signing in.');
+      throw new Error(error?.message || 'Unable to sign in. Please try again.');
     }
 
-    const hydrated = await hydrateAppUser(data.user);
-    setUser(hydrated.user);
-    setRole(hydrated.role);
-    window.location.replace(hydrated.role === 'admin' ? '/admin' : '/dashboard');
+    try {
+      const hydrated = await hydrateAppUser(data.user);
+      setUser(hydrated.user);
+      setRole(hydrated.role);
+    } catch (profileError) {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+      clearPersistentSession();
+      setUser(null);
+      setRole(null);
+      throw profileError;
+    }
   };
 
   const signOut = async () => {

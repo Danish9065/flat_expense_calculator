@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { GroupProvider } from './context/GroupContext';
 import { ToastProvider } from './context/ToastContext';
@@ -59,20 +59,36 @@ function App() {
         <AuthProvider>
           <GroupProvider>
             <ToastProvider>
-              <div className="min-h-screen bg-background text-white font-sans flex flex-col pt-16 md:pt-20 pb-16 md:pb-0">
-                <TopNavbar />
+              <AppLayout />
+            </ToastProvider>
+          </GroupProvider>
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
+  );
+}
 
-                <main className="flex-grow w-full">
+const AUTH_PATHS = new Set(['/login', '/signup', '/verify-otp', '/auth/callback', '/forgot-password', '/verify-password-otp', '/reset-password']);
+
+function AppLayout() {
+  const location = useLocation();
+  const isAuthPage = AUTH_PATHS.has(location.pathname);
+
+  return (
+    <div className={`min-h-screen bg-background text-white font-sans flex flex-col ${isAuthPage ? '' : 'pt-16 md:pt-20 pb-16 md:pb-0'}`}>
+      {isAuthPage ? null : <TopNavbar />}
+
+      <main className="flex-grow w-full">
                   <Routes>
                     {/* Public Routes */}
                     <Route path="/" element={<LandingRoute />} />
-                    <Route path="/login" element={<div className="-mt-16 md:-mt-20"><Login /></div>} />
-                    <Route path="/signup" element={<div className="-mt-16 md:-mt-20"><Signup /></div>} />
-                    <Route path="/verify-otp" element={<div className="-mt-16 md:-mt-20"><VerifyOtp /></div>} />
-                    <Route path="/auth/callback" element={<div className="-mt-16 md:-mt-20"><AuthCallback /></div>} />
-                    <Route path="/forgot-password" element={<div className="-mt-16 md:-mt-20"><ForgotPassword /></div>} />
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/signup" element={<Signup />} />
+                    <Route path="/verify-otp" element={<VerifyOtp />} />
+                    <Route path="/auth/callback" element={<AuthCallback />} />
+                    <Route path="/forgot-password" element={<ForgotPassword />} />
                     <Route path="/verify-password-otp" element={<Navigate to="/forgot-password" replace />} />
-                    <Route path="/reset-password" element={<div className="-mt-16 md:-mt-20"><ResetPassword /></div>} />
+                    <Route path="/reset-password" element={<ResetPassword />} />
 
                     {/* Protected Routes */}
                     <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -84,18 +100,13 @@ function App() {
                     <Route path="/admin" element={<ProtectedRoute adminOnly={true}><Admin /></ProtectedRoute>} />
 
                     {/* 404 Route */}
-                    <Route path="*" element={<div className="-mt-16 md:-mt-20"><NotFound /></div>} />
+                    <Route path="*" element={<NotFound />} />
                   </Routes>
-                </main>
+      </main>
 
-                <BottomNav />
-                <InstallPrompt />
-              </div>
-            </ToastProvider>
-          </GroupProvider>
-        </AuthProvider>
-      </Router>
-    </ErrorBoundary>
+      {isAuthPage ? null : <BottomNav />}
+      <InstallPrompt />
+    </div>
   );
 }
 

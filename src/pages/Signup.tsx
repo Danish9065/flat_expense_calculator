@@ -6,6 +6,8 @@ import { useToast } from '../context/ToastContext';
 import { isValidUpiId, normalizeUpiId } from '../lib/paymentLinks';
 import CountryCodeSelect from '../components/CountryCodeSelect';
 import { buildInternationalWhatsAppNumber, sanitizeLocalPhoneNumber } from '../lib/countryPhone';
+import { getInviteKeyError, normalizeInviteKey, type InviteKeyStatus } from '../utils/invite';
+import { useAuth } from '../context/AuthContext';
 
 export default function Signup() {
     const [searchParams] = useSearchParams();
@@ -23,6 +25,7 @@ export default function Signup() {
 
     const navigate = useNavigate();
     const { success, error: showError } = useToast();
+    const { refreshProfile } = useAuth();
 
     // Password strength logic
     const getPasswordStrength = (pwd: string) => {
@@ -59,15 +62,18 @@ export default function Signup() {
         if (!isFormValid) return;
         setLoading(true);
         try {
-            const normalizedInviteKey = inviteKey.trim().toUpperCase();
-            const { data: keyIsValid, error: keyError } = await supabaseClient.rpc('validate_invite_key', {
+            const normalizedInviteKey = normalizeInviteKey(inviteKey);
+            const { data: inviteStatus, error: keyError } = await supabaseClient.rpc('invite_key_status', {
                 key_code_param: normalizedInviteKey,
             });
 
-            if (keyError || keyIsValid !== true) throw new Error('Invalid or already used invite key');
+            if (keyError) throw new Error('We could not check the invite key. Please try again.');
+            if (inviteStatus !== 'available') {
+                throw new Error(getInviteKeyError((inviteStatus || 'invalid') as Exclude<InviteKeyStatus, 'available'>));
+            }
 
-            const { error: authError } = await supabaseClient.auth.signUp({
-                email,
+            const { data: authData, error: authError } = await supabaseClient.auth.signUp({
+                email: email.trim().toLowerCase(),
                 password,
                 options: {
                     emailRedirectTo: `${window.location.origin}/auth/callback`,
@@ -82,10 +88,14 @@ export default function Signup() {
 
             if (authError) throw new Error(authError.message || 'Failed to sign up');
 
-            success('Verification link sent! Please check your email.');
-            navigate('/verify-otp', {
-                state: { email }
-            });
+            if (authData.session) {
+                await refreshProfile();
+                success('Account created. Welcome to SplitMate!');
+                navigate('/dashboard', { replace: true });
+            } else {
+                success('Verification link sent! Please check your email.');
+                navigate('/verify-otp', { state: { email: email.trim().toLowerCase() } });
+            }
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'An unexpected error occurred');
         } finally {
@@ -126,7 +136,7 @@ export default function Signup() {
                                     type="text"
                                     value={inviteKey}
                                     placeholder="SPLIT-XXXXXX"
-                                    onChange={(e) => setInviteKey(e.target.value.toUpperCase())}
+                                    onChange={(e) => setInviteKey(normalizeInviteKey(e.target.value))}
                                     className="auth-field font-mono uppercase"
                                 />
                             </div>

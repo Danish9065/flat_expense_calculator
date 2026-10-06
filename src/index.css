@@ -8,7 +8,7 @@
   }
 
   body {
-    @apply bg-background text-white antialiased;
+    @apply bg-background text-white antialiased overflow-x-hidden;
   }
 }
 
@@ -131,7 +131,8 @@
   }
 
   .auth-shell {
-    @apply min-h-screen flex flex-col justify-center px-4 py-8 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,#231111_0%,#050505_38%,#050505_100%)];
+    min-height: 100dvh;
+    @apply flex w-full flex-col justify-start px-4 py-8 sm:justify-center sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,#231111_0%,#050505_38%,#050505_100%)];
   }
 
   .auth-header {
@@ -155,7 +156,7 @@
   }
 
   .auth-card-wrap {
-    @apply mt-6 sm:mx-auto sm:w-full sm:max-w-md;
+    @apply mt-6 w-full sm:mx-auto sm:max-w-md;
   }
 
   .auth-card {
@@ -167,7 +168,7 @@
   }
 
   .auth-field {
-    @apply dark-input h-10 rounded-xl pl-10 pr-3 text-sm;
+    @apply dark-input h-12 rounded-xl pl-10 pr-3 text-base sm:text-sm;
   }
 
   .auth-field-icon {
