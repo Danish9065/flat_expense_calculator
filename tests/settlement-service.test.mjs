@@ -50,7 +50,7 @@ beforeEach(() => {
       { expense_id: 'e2', user_id: 'me', amount_owed: 10 },
       { expense_id: 'e2', user_id: 'c', amount_owed: 10 },
       { expense_id: 'other', user_id: 'me', amount_owed: 999 },
-    ], settlements: [], writes: [],
+    ], settlements: [], writes: [], group_members: ['me','b','c'].map(user_id => ({user_id,group_id:'g'})), former_group_members: [],
   };
 });
 
@@ -99,5 +99,31 @@ test('a valid current receipt writes once and concurrent confirmation is blocked
 test('combined receipts reject duplicate allocations without recording them twice', async () => {
   const allocation={groupId:'g',debtorId:'me',creditorId:'b',amount:10};
   await assert.rejects(service.settleMultiple([allocation,allocation]), /unique/);
+  assert.equal(globalThis.__ledgerFixture.writes.length,0);
+});
+
+test('removed members keep their ledger rows and names but cannot receive new payments',async()=>{
+  const state=globalThis.__ledgerFixture;
+  state.group_members=state.group_members.filter(row=>row.user_id!=='c');
+  state.former_group_members=[{user_id:'c',full_name:'Former kitchen member',group_id:'g'}];
+  const report=await service.getCalculationExplanation('g');
+  assert.equal(report.issues.length,0);
+  assert.deepEqual(report.historicalPayments,[{from:'c',to:'me',amount:10}]);
+  assert.deepEqual(report.suggestedPayments,[{from:'me',to:'b',amount:20}]);
+  assert.equal(report.memberRows.find(row=>row.userId==='c').netBalance,-10);
+  assert.equal(report.formerMembers[0].full_name,'Former kitchen member');
+  await assert.rejects(service.settleUp('g','c','me',10),/changed/);
+  await assert.rejects(service.settleUpPartial('g','c','me',100),/changed/);
+  await assert.rejects(service.settleMultiple([{groupId:'g',debtorId:'c',creditorId:'me',amount:10}]),/changed/);
+  assert.equal(state.writes.length,0);
+  await service.settleUp('g','me','b',20);
+  assert.equal(state.writes.length,1);
+});
+
+test('membership or history lookup failure blocks payment confirmation',async()=>{
+  for(const table of ['group_members','former_group_members']){
+    globalThis.__ledgerFixture.fail=table;
+    await assert.rejects(service.settleUp('g','me','b',10),/Network failed/);
+  }
   assert.equal(globalThis.__ledgerFixture.writes.length,0);
 });

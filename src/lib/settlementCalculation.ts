@@ -29,6 +29,7 @@ export interface SettlementCalculation {
   issues: string[];
   members: LedgerMember[];
   directSettlements: Array<{ from: string; to: string; amount: number }>;
+  historicalSettlements: Array<{ from: string; to: string; amount: number }>;
   settlements: Array<{ from: string; to: string; amount: number }>;
   totals: {
     expenses: number;
@@ -123,6 +124,7 @@ export function calculateSettlementLedger(
   expenses: LedgerExpense[],
   splits: LedgerSplit[],
   payments: LedgerPayment[],
+  activeMemberIds?: string[],
 ): SettlementCalculation {
   const issues: string[] = [];
   const expenseShares = new Map<string, number>();
@@ -211,14 +213,37 @@ export function calculateSettlementLedger(
       ? { from: pair.left, to: pair.right, amount: fromCents(pair.leftOwesRight) }
       : { from: pair.right, to: pair.left, amount: fromCents(-pair.leftOwesRight) })
     .sort((a, b) => b.amount - a.amount || a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+  const active = activeMemberIds ? new Set(activeMemberIds) : null;
+  // Simplify the immutable historical subledger first. A former member who
+  // already paid their full net debt must not reappear with unpaid pair debts.
+  const historicalExpenseIds = active ? new Set([
+    ...expenses.filter((expense) => !active.has(expense.added_by)).map((expense) => expense.id),
+    ...splits.filter((split) => !active.has(split.user_id)).map((split) => split.expense_id),
+  ]) : null;
+  const historicalSettlements = active && historicalExpenseIds && issues.length === 0
+    ? calculateSettlementLedger(
+        expenses.filter((expense) => historicalExpenseIds.has(expense.id)),
+        splits.filter((split) => historicalExpenseIds.has(split.expense_id)),
+        payments.filter((payment) => !active.has(payment.paid_by) || !active.has(payment.paid_to)),
+      ).settlements.filter((row) => !active.has(row.from) || !active.has(row.to))
+    : [];
+  // Exclude historical obligations before simplifying current members. Their
+  // inputs are read-only, so future active expenses cannot reroute them.
+  const actionableNet = { ...netCents };
+  for (const row of historicalSettlements) {
+    const cents = Math.round(row.amount * 100);
+    actionableNet[row.from] += cents;
+    actionableNet[row.to] -= cents;
+  }
   const settlements = balanceChecksum === 0 && issues.length === 0
-    ? minimizeNetBalances(Object.fromEntries(Object.entries(netCents).map(([userId, cents]) => [userId, fromCents(cents)])))
+    ? minimizeNetBalances(Object.fromEntries(Object.entries(actionableNet).filter(([id]) => !active || active.has(id)).map(([userId, cents]) => [userId, fromCents(cents)])))
     : [];
 
   return {
     issues,
     members,
     directSettlements,
+    historicalSettlements: issues.length ? [] : historicalSettlements,
     settlements,
     totals: {
       expenses: fromCents(expenseTotal),

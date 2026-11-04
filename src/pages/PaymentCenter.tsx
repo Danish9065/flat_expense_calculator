@@ -29,6 +29,7 @@ export default function PaymentCenter() {
   const { success, error: showError } = useToast();
   const [view, setView] = useState<'all' | 'group'>('all');
   const [payments, setPayments] = useState<ConsolidatedPayment[]>([]);
+  const [historicalPayments, setHistoricalPayments] = useState<Array<{ key: string; groupName: string; from: string; to: string; amount: number }>>([]);
   const [profiles, setProfiles] = useState<Record<string, ProfileSummary>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,13 +47,21 @@ export default function PaymentCenter() {
     const requestId = ++requestIdRef.current;
 
     try {
-      const sources = await Promise.all(groupList.map(async (group): Promise<GroupSettlementSource> => ({
-        groupId: group.id,
-        groupName: group.name || 'Unnamed group',
-        settlements: await SettlementService.calculateGroupSettlements(group.id),
-      })));
+      const reports = await Promise.all(groupList.map(async (group) => {
+        const report = await SettlementService.getCalculationExplanation(group.id);
+        if (report.issues.length) throw new Error(report.issues[0]);
+        return { group, report };
+      }));
+      const sources: GroupSettlementSource[] = reports.map(({ group, report }) => ({
+        groupId: group.id, groupName: group.name || 'Unnamed group', settlements: report.suggestedPayments,
+      }));
+      const archivedNames = new Map(reports.flatMap(({ report }) => report.formerMembers.map((member) => [member.user_id, member.full_name] as const)));
+      const historical = reports.flatMap(({ group, report }) => report.historicalPayments
+        .filter((row) => row.from === user.id || row.to === user.id)
+        .map((row) => ({ ...row, key: `${group.id}:${row.from}:${row.to}`, groupName: group.name || 'Unnamed group' })));
+
       const consolidated = aggregateUserPayments(sources, user.id);
-      const profileIds = Array.from(new Set([user.id, ...consolidated.map((payment) => payment.counterpartyId)]));
+      const profileIds = Array.from(new Set([user.id, ...consolidated.map((payment) => payment.counterpartyId), ...historical.flatMap((row) => [row.from, row.to])]));
 
       const [userRows, paymentRows] = profileIds.length > 0
         ? await Promise.all([
@@ -70,7 +79,11 @@ export default function PaymentCenter() {
         profileMap[row.id] = { ...row, ...paymentByUser.get(row.id) };
       }
 
+      for (const [id, name] of archivedNames) {
+        if (!profileMap[id]) profileMap[id] = { id, full_name: `${name} (Former member)` };
+      }
       if (requestId === requestIdRef.current) {
+        setHistoricalPayments(historical);
         setLoadError('');
         setLoadedScope(scope);
         setProfiles(profileMap);
@@ -173,9 +186,14 @@ export default function PaymentCenter() {
         </div>
       ) : (
         <>
+          {historicalPayments.length > 0 ? <section className="app-panel mb-6 p-5" aria-label="Former member balances">
+            <h2 className="text-lg font-bold text-white">Former member balances · read-only</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Past shares and payments are preserved. New payments and charges involving former members are disabled.</p>
+            <div className="mt-4 space-y-3">{historicalPayments.map((row) => <p key={row.key} className="text-sm text-white">{row.groupName}: {row.from === user?.id ? 'You' : profiles[row.from]?.full_name || 'Former member'} owe {row.to === user?.id ? 'you' : profiles[row.to]?.full_name || 'Former member'} <strong>₹{row.amount.toFixed(2)}</strong></p>)}</div>
+          </section> : null}
           <div role="note" className="mb-6 rounded-2xl border border-amber-300/25 bg-amber-300/[0.07] p-4 text-sm leading-relaxed text-amber-100/90">
             <strong className="text-white">This is your personal payment view.</strong>{' '}
-            “All groups” only shows payments involving the currently signed-in account, combined across every group you belong to. It is not the complete balance sheet for every member. Open{' '}
+            “All groups” shows active payments involving the currently signed-in account. Former member balances appear separately as read-only history. Active payments are combined across every group you belong to. It is not the complete balance sheet for every member. Open{' '}
             <button type="button" onClick={() => setView('group')} className="font-bold text-amber-200 underline decoration-amber-200/50 underline-offset-4 hover:text-white">
               Group details
             </button>{' '}
@@ -193,7 +211,7 @@ export default function PaymentCenter() {
           </div>
 
           {payments.length === 0 ? (
-            <div className="app-panel border-dashed py-14 text-center"><CheckCircle2 className="mx-auto h-12 w-12 text-success" /><h2 className="mt-3 text-lg font-bold text-white">All groups are settled</h2><p className="mt-1 text-sm text-muted-foreground">There are no payments involving you right now.</p></div>
+            <div className="app-panel border-dashed py-14 text-center"><CheckCircle2 className="mx-auto h-12 w-12 text-success" /><h2 className="mt-3 text-lg font-bold text-white">{historicalPayments.length ? 'No active payments due' : 'All groups are settled'}</h2><p className="mt-1 text-sm text-muted-foreground">There are no payments involving you right now.</p></div>
           ) : (
             <div className="space-y-4">
               {payments.map((payment) => {

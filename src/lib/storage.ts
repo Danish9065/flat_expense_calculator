@@ -1,6 +1,14 @@
 import { supabaseClient } from './db';
 
 const STORAGE_REFERENCE_PREFIX = 'supabase-storage://';
+const STORAGE_BUCKETS = new Set(['avatars', 'receipts']);
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+export function validateUpload(file: File) {
+  if (!file.size) throw new Error('The selected file is empty');
+  if (file.size > 5 * 1024 * 1024) throw new Error('Images must be 5 MB or smaller');
+  if (!IMAGE_TYPES.has(file.type)) throw new Error('Only JPEG, PNG and WebP images are supported');
+}
 
 export function createStorageReference(bucket: string, path: string) {
   return `${STORAGE_REFERENCE_PREFIX}${bucket}/${encodeURIComponent(path)}`;
@@ -11,10 +19,16 @@ export function parseStorageReference(reference?: string | null) {
   const value = reference.slice(STORAGE_REFERENCE_PREFIX.length);
   const separator = value.indexOf('/');
   if (separator <= 0) return null;
-  return {
-    bucket: value.slice(0, separator),
-    path: decodeURIComponent(value.slice(separator + 1)),
-  };
+  const bucket = value.slice(0, separator);
+  let path: string;
+  try { path = decodeURIComponent(value.slice(separator + 1)); }
+  catch { throw new Error('Invalid attachment reference'); }
+  // eslint-disable-next-line no-control-regex -- Reject control characters in object paths.
+  if (!STORAGE_BUCKETS.has(bucket) || !path || /[\\\x00-\x1f]/.test(path)
+    || path.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw new Error('Invalid attachment reference');
+  }
+  return { bucket, path };
 }
 
 export function safeStorageFileName(fileName: string) {
@@ -52,7 +66,8 @@ async function executeStorageRequest<T>(operation: () => PromiseLike<StorageResu
 }
 
 export async function uploadPrivateFile(bucket: string, path: string, file: File) {
-  if (!file.size) throw new Error('The selected file is empty');
+  validateUpload(file);
+  parseStorageReference(createStorageReference(bucket, path));
   const data = await executeStorageRequest(() => supabaseClient.storage.from(bucket).upload(path, file, {
       cacheControl: '3600',
       contentType: file.type || undefined,
@@ -64,7 +79,9 @@ export async function uploadPrivateFile(bucket: string, path: string, file: File
 
 export async function getSignedStorageUrl(reference: string, expiresIn = 3600) {
   const parsed = parseStorageReference(reference);
-  if (!parsed) return reference;
+  // Stored strings are untrusted: never turn javascript:, data:, or arbitrary
+  // external URLs into a clickable attachment or tracking image.
+  if (!parsed) throw new Error('Invalid attachment reference');
   const data = await executeStorageRequest(() => supabaseClient.storage
       .from(parsed.bucket)
       .createSignedUrl(parsed.path, expiresIn));

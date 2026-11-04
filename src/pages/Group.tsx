@@ -7,10 +7,12 @@ import ConfirmModal from '../components/ConfirmModal';
 import { Copy, RefreshCw, Download, Users, Shield, User as UserIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import SecureStorageImage from '../components/SecureStorageImage';
+import { generateInviteKey } from '../utils/invite';
+import { csvCell } from '../lib/csv';
 
 export default function GroupPage() {
     const { role, user } = useAuth();
-    const { groupId, groupName, inviteCode, members, groups, switchGroup, refreshGroup, loading: groupLoading, error: groupError } = useGroup();
+    const { groupId, groupName, inviteCode, members, formerMembers, groups, switchGroup, refreshGroup, loading: groupLoading, error: groupError } = useGroup();
     const { success, error: showError } = useToast();
     const [regenerating, setRegenerating] = useState(false);
     const [exporting, setExporting] = useState(false);
@@ -29,17 +31,12 @@ export default function GroupPage() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const groupName = (e.target as any).groupname.value.trim();
             if (!groupName) throw new Error('Group name required');
-            const invCode = 'SPLIT-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+            const invCode = generateInviteKey();
             // Insert group
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const newGroups: any = await dbInsert('groups', { name: groupName, invite_code: invCode, created_by: user.id });
             const newGroup = Array.isArray(newGroups) ? newGroups[0] : newGroups;
             if (!newGroup?.id) throw new Error('Failed to create group');
-            // Add admin as member
-            try {
-                await supabaseClient.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
-            } catch { /* safe to ignore, user might already exist */ }
-
             await dbInsert('group_members', { group_id: newGroup.id, user_id: user.id });
             success('Group created successfully!');
             if (refreshGroup) await refreshGroup();
@@ -56,11 +53,6 @@ export default function GroupPage() {
         if (!joinCode.trim() || !user) return;
         setJoining(true);
         try {
-            // Ensure user exists in users table first (patch for early signups)
-            try {
-                await supabaseClient.from('users').upsert({ id: user.id, email: user.email, full_name: user?.full_name || 'Member' }, { onConflict: 'id' }).select();
-            } catch { /* safe to ignore, user might already exist */ }
-
             const { data: joinedGroupId, error: joinError } = await supabaseClient.rpc('join_group_by_invite_code', {
                 invite_code_param: joinCode.trim().toUpperCase(),
             });
@@ -86,7 +78,7 @@ export default function GroupPage() {
     const handleRegenerateCode = async () => {
         setRegenerating(true);
         try {
-            const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+            const newCode = generateInviteKey();
             await dbUpdate('groups', `id=eq.${groupId}`, { invite_code: newCode });
             await refreshGroup();
             success('Invite code regenerated successfully');
@@ -121,7 +113,8 @@ export default function GroupPage() {
             const resolveNameById = (userId: string): string => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const m = members.find((mem: any) => mem.user_id === userId);
-                return m?.users?.full_name || userId;
+                const former = (formerMembers as { user_id: string; full_name: string }[]).find((member) => member.user_id === userId);
+                return m?.users?.full_name || (former ? `${former.full_name} (Former member)` : userId);
             };
 
             // Build CSV
@@ -131,22 +124,22 @@ export default function GroupPage() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             expenses.forEach((e: any) => {
                 const date = e.created_at ? format(new Date(e.created_at), 'yyyy-MM-dd HH:mm:ss') : '';
-                const note = e.note ? `"${e.note.replace(/"/g, '""')}"` : '';
-                const item = `"${e.item_name.replace(/"/g, '""')}"`;
+                const note = e.note || '';
+                const item = e.item_name;
 
                 // Paid By: prefer joined users.full_name (from added_by FK), fallback to member lookup
                 const paidByName: string =
                     e.users?.full_name || resolveNameById(e.added_by) || 'Unknown';
-                const paidByCell = `"${paidByName.replace(/"/g, '""')}"`;
+                const paidByCell = paidByName;
 
                 // For (Members): resolve split entries to names
                 const splitEntries: { user_id: string; amount_owed: number }[] = e.expense_splits || [];
                 let forCell: string;
-                if (splitEntries.length === 0 || splitEntries.length >= totalMemberCount) {
+                if (splitEntries.length === totalMemberCount && members.every((member: { user_id: string }) => splitEntries.some((split) => split.user_id === member.user_id))) {
                     forCell = 'All Members';
                 } else {
                     const splitNames = splitEntries.map((s) => resolveNameById(s.user_id)).join('; ');
-                    forCell = `"${splitNames.replace(/"/g, '""')}"`;
+                    forCell = splitNames;
                 }
 
                 // Each Share: if all splits have the same amount → single value; otherwise name:amount pairs
@@ -162,7 +155,7 @@ export default function GroupPage() {
                         const parts = splitEntries.map(
                             (s) => `${resolveNameById(s.user_id)}:₹${Number(s.amount_owed).toFixed(2)}`
                         ).join('; ');
-                        shareCell = `"${parts}"`;
+                        shareCell = parts;
                     }
                 }
 
@@ -177,7 +170,7 @@ export default function GroupPage() {
                     note
                 ];
 
-                csvRows.push(row.join(','));
+                csvRows.push(row.map(csvCell).join(','));
             });
 
             // ── Settlement rows ────────────────────────────────────────────
@@ -196,27 +189,21 @@ export default function GroupPage() {
                     const date = s.settled_at
                         ? format(new Date(s.settled_at), 'yyyy-MM-dd HH:mm:ss')
                         : '';
-                    const item = '"Settlement Payment"';
+                    const item = 'Settlement Payment';
                     const category = 'Settlement';
                     const amount = Number(s.amount).toFixed(2);
-                    const paidBy = `"${resolveNameById(s.paid_by).replace(/"/g, '""')}"`;
-                    const forMember = `"${resolveNameById(s.paid_to).replace(/"/g, '""')}"`;
+                    const paidBy = resolveNameById(s.paid_by);
+                    const forMember = resolveNameById(s.paid_to);
                     const eachShare = Number(s.amount).toFixed(2);
-                    const note = '"Settled ✓"';
+                    const note = 'Settled ✓';
 
-                    settlementRows.push([date, item, category, amount, paidBy, forMember, eachShare, note].join(','));
+                    settlementRows.push([date, item, category, amount, paidBy, forMember, eachShare, note].map(csvCell).join(','));
                 });
             }
 
             // Build final CSV: settlement rows (newest first) then expense rows
             const allDataRows = [...settlementRows, ...csvRows.slice(1)];
             const finalCsvRows = [csvRows[0], ...allDataRows];
-
-            // Debug: log the first data row so you can verify values in the browser console
-            if (finalCsvRows.length > 1) {
-                console.log('[CSV Export] Headers:', finalCsvRows[0]);
-                console.log('[CSV Export] First row:', finalCsvRows[1]);
-            }
 
             const csvContent = finalCsvRows.join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

@@ -91,7 +91,13 @@ create table public.notifications (
 create table public.user_payment_profiles (
   user_id uuid primary key references public.users(id) on delete cascade,
   whatsapp_number text check (whatsapp_number is null or whatsapp_number ~ '^[1-9][0-9]{7,14}$'),
-  upi_id text check (upi_id is null or upi_id ~* '^[A-Z0-9._-]{2,256}@[A-Z0-9.-]{2,64}$'),
+  -- PostgreSQL's regex repetition bounds cannot exceed 255. Keep the length
+  -- checks separate so a clean recovery can reach the subsequent migrations.
+  upi_id text check (upi_id is null or (
+    upi_id ~* '^[A-Z0-9._-]+@[A-Z0-9.-]+$'
+    and char_length(split_part(upi_id, '@', 1)) between 2 and 256
+    and char_length(split_part(upi_id, '@', 2)) between 2 and 64
+  )),
   updated_at timestamptz not null default timezone('utc', now())
 );
 

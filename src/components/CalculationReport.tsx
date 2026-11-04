@@ -77,11 +77,14 @@ export default function CalculationReport({
     members.forEach((member) => {
       if (member.users?.full_name) result.set(member.user_id, member.users.full_name);
     });
+    report?.formerMembers.forEach((member) => {
+      if (!result.has(member.user_id)) result.set(member.user_id, `${member.full_name} (Former member)`);
+    });
     Object.entries(fallbackUsers).forEach(([id, profile]) => {
       if (profile.full_name && !result.has(id)) result.set(id, `${profile.full_name} (removed)`);
     });
     return result;
-  }, [fallbackUsers, members]);
+  }, [fallbackUsers, members, report]);
 
   const getName = (id: string) => names.get(id) || `Member ${id.slice(0, 6)}`;
   const splitsByExpense = useMemo(() => {
@@ -230,9 +233,11 @@ export default function CalculationReport({
               </section>
 
               <section className="report-section border-t border-black/10 py-10">
-                <div className="mb-6 flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#dce8df] text-[#173f33]"><Scale className="h-5 w-5" /></div><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#1f704c]">Step 4</p><h2 className="text-2xl font-black">The shortest way to settle</h2><p className="mt-2 text-sm text-[#66736c]">The app matches the largest amount owed with the largest amount due until every balance reaches zero.</p></div></div>
-                {report.suggestedPayments.length > 0 ? <div className="grid gap-3 sm:grid-cols-2">{report.suggestedPayments.map((payment, index) => <div key={`${payment.from}-${payment.to}-${index}`} className="rounded-2xl border border-black/10 bg-white p-4"><div className="flex items-center gap-3"><span className="min-w-0 flex-1 truncate font-bold">{getName(payment.from)}</span><ArrowRight className="h-5 w-5 shrink-0 text-[#c45735]" /><span className="min-w-0 flex-1 truncate text-right font-bold">{getName(payment.to)}</span></div><p className="mt-3 text-center text-2xl font-black text-[#173f33]">{money(payment.amount)}</p></div>)}</div> : <div className="rounded-2xl bg-[#e5f0e7] p-5 text-center font-bold text-[#173f33]">Nothing is owed. Everyone is settled up.</div>}
+                <div className="mb-6 flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#dce8df] text-[#173f33]"><Scale className="h-5 w-5" /></div><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#1f704c]">Step 4</p><h2 className="text-2xl font-black">Recommended active payments</h2><p className="mt-2 text-sm text-[#66736c]">The app simplifies debts between active members. Former member debts remain in the historical breakdown below.</p></div></div>
+                {report.suggestedPayments.length > 0 ? <div className="grid gap-3 sm:grid-cols-2">{report.suggestedPayments.map((payment, index) => <div key={`${payment.from}-${payment.to}-${index}`} className="rounded-2xl border border-black/10 bg-white p-4"><div className="flex items-center gap-3"><span className="min-w-0 flex-1 truncate font-bold">{getName(payment.from)}</span><ArrowRight className="h-5 w-5 shrink-0 text-[#c45735]" /><span className="min-w-0 flex-1 truncate text-right font-bold">{getName(payment.to)}</span></div><p className="mt-3 text-center text-2xl font-black text-[#173f33]">{money(payment.amount)}</p></div>)}</div> : <div className="rounded-2xl bg-[#e5f0e7] p-5 text-center font-bold text-[#173f33]">{report.issues.length ? 'Calculation unavailable. Review the ledger issues above.' : report.historicalPayments.length ? 'No active payments due. Former member balances remain read-only.' : 'Nothing is owed. Everyone is settled up.'}</div>}
               </section>
+
+              {report.historicalPayments.length ? <section className="report-section border-t border-black/10 py-10"><h2 className="text-2xl font-black">Former member balances · read-only</h2><p className="mt-2 text-sm">Preserved historical obligations. No new payment can be recorded for these balances.</p><div className="mt-4 space-y-2">{report.historicalPayments.map((row) => <p key={`${row.from}:${row.to}`}>{getName(row.from)} owes {getName(row.to)} <strong>{money(row.amount)}</strong></p>)}</div></section> : null}
 
               <section className="report-section border-t border-black/10 py-10">
                 <div className="mb-6"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#9c3f24]">Audit details</p><h2 className="text-2xl font-black">Every expense and assigned share</h2><p className="mt-2 text-sm text-[#66736c]">Rounding is stored in paise. When an amount cannot split evenly, extra paise are distributed one per member, starting with the payer.</p></div>

@@ -8,12 +8,13 @@ import { build } from 'esbuild';
 
 let invite;
 let recovery;
+let csv;
 let outputDirectory;
 
 before(async () => {
   outputDirectory = await mkdtemp(join(tmpdir(), 'splitmate-auth-flows-'));
   await build({
-    entryPoints: ['src/utils/invite.ts', 'src/lib/passwordRecovery.ts'],
+    entryPoints: ['src/utils/invite.ts', 'src/lib/passwordRecovery.ts', 'src/lib/csv.ts'],
     outdir: outputDirectory,
     entryNames: '[name]',
     outExtension: { '.js': '.mjs' },
@@ -23,6 +24,7 @@ before(async () => {
   });
   invite = await import(pathToFileURL(join(outputDirectory, 'invite.mjs')).href);
   recovery = await import(pathToFileURL(join(outputDirectory, 'passwordRecovery.mjs')).href);
+  csv = await import(pathToFileURL(join(outputDirectory, 'csv.mjs')).href);
 });
 
 after(async () => {
@@ -32,6 +34,24 @@ after(async () => {
 
 test('normalizes invite keys copied with spaces and lowercase letters', () => {
   assert.equal(invite.normalizeInviteKey('  split- k7mn2p  '), 'SPLIT-K7MN2P');
+});
+
+test('invite generation uses Web Crypto, never Math.random', () => {
+  const original = Math.random;
+  Math.random = () => { throw new Error('Insecure random source'); };
+  try {
+    const keys = Array.from({length:100}, () => invite.generateInviteKey());
+    for (const key of keys) assert.match(key, /^[A-HJ-NP-Z2-9]{12}$/);
+    assert.equal(new Set(keys).size, keys.length);
+  } finally { Math.random = original; }
+});
+
+test('CSV escapes delimiters and blocks spreadsheet formulas in every text field', () => {
+  assert.equal(csv.csvCell('a,"b"\nc'), '"a,""b""\nc"');
+  for (const value of ['=HYPERLINK("https://evil.test")', '+1+1', '-1+1', '@SUM(A1)', '\t=1+1', '  =1+1', '\r=1']) {
+    assert.ok(csv.csvCell(value).startsWith('"\''), value);
+  }
+  assert.equal(csv.csvCell(12.34), '"12.34"');
 });
 
 test('shows a specific invite-key error instead of a misleading generic failure', () => {

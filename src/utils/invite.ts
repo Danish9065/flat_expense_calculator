@@ -1,10 +1,7 @@
 export function generateInviteKey(): string {
+    // 12 base32 characters = 60 random bits, within the database's varchar(12).
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let key = 'SPLIT-';
-    for (let i = 0; i < 6; i++) {
-        key += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return key; // e.g. SPLIT-K7MN2P
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => chars[byte & 31]).join('');
 }
 
 export type InviteKeyStatus = 'available' | 'used' | 'expired' | 'invalid';

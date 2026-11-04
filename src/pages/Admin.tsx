@@ -40,6 +40,7 @@ export default function Admin() {
     const [userToDelete, setUserToDelete] = useState<AdminUserRow | null>(null);
     const [userToRemove, setUserToRemove] = useState<AdminUserRow | null>(null);
     const [removeWarning, setRemoveWarning] = useState<string>('');
+    const [removingMember, setRemovingMember] = useState(false);
     const [showDeleteAllExpenses, setShowDeleteAllExpenses] = useState(false);
     const [deletingExpenses, setDeletingExpenses] = useState(false);
 
@@ -138,24 +139,11 @@ export default function Admin() {
 
     const checkAndPromptRemove = async (u: AdminUserRow) => {
         try {
-            const calcSettlements = await SettlementService.calculateGroupSettlements(groupId || '', members, 'All');
-            let owes = 0;
-            let owed = 0;
-            calcSettlements.forEach(s => {
-                if (s.from === u.id) owes += s.amount;
-                if (s.to === u.id) owed += s.amount;
-            });
-
-            if (owes > 0 || owed > 0) {
-                let msg = `${u.full_name} `;
-                if (owes > 0 && owed > 0) msg += `still owes ₹${owes.toFixed(2)} and is owed ₹${owed.toFixed(2)}. `;
-                else if (owes > 0) msg += `still owes ₹${owes.toFixed(2)}. `;
-                else msg += `is still owed ₹${owed.toFixed(2)}. `;
-                msg += "Removing them will preserve this debt as 'Pending Settlement' in the Balances tab. Continue?";
-                setRemoveWarning(msg);
-            } else {
-                setRemoveWarning(`Are you sure you want to remove ${u.full_name} from this group? Their past expenses will remain but they will lose access.`);
-            }
+            const report = await SettlementService.getCalculationExplanation(groupId || '');
+            if (report.issues.length) throw new Error(report.issues[0]);
+            const balance = report.memberRows.find((row) => row.userId === u.id)?.netBalance ?? 0;
+            const obligation = balance < 0 ? `still owes ₹${(-balance).toFixed(2)}` : balance > 0 ? `is still owed ₹${balance.toFixed(2)}` : 'has no net amount due';
+            setRemoveWarning(`${u.full_name} ${obligation}. Removing them preserves their name, expenses, shares and payment history. They will lose group access, and their remaining balance becomes read-only. No new charges or payments can involve them. Continue?`);
             setUserToRemove(u);
         } catch {
             showError('Failed to check balances');
@@ -163,7 +151,8 @@ export default function Admin() {
     };
 
     const handleRemoveFromGroup = async () => {
-        if (!userToRemove || !groupId) return;
+        if (!userToRemove || !groupId || removingMember) return;
+        setRemovingMember(true);
         try {
             await dbDelete('group_members', `group_id=eq.${groupId}&user_id=eq.${userToRemove.id}`);
             success(`${userToRemove.full_name} removed from the group successfully`);
@@ -174,6 +163,8 @@ export default function Admin() {
             await notifyGroupDataChanged(groupId);
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'Failed to remove user from group');
+        } finally {
+            setRemovingMember(false);
         }
     };
 
@@ -293,8 +284,9 @@ export default function Admin() {
                             {u.id !== user?.id && (
                                 <div className="flex gap-2">
                                     <button
+                                        disabled={!groupId || !members.some((member: { user_id: string }) => member.user_id === u.id)}
                                         onClick={() => checkAndPromptRemove(u)}
-                                        className="p-2 text-warning hover:text-warning/80 hover:bg-warning/10 rounded-lg transition-colors"
+                                        className="p-2 text-warning hover:text-warning/80 hover:bg-warning/10 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                         title="Remove from Group"
                                     >
                                         <UserMinus className="w-4 h-4" />

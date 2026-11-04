@@ -102,3 +102,22 @@ test('round-trips private references and sanitizes unsafe file names', () => {
   });
   assert.equal(storage.safeStorageFileName('  My bill (1).png  '), 'My-bill-1-.png');
 });
+
+test('rejects executable URLs, external links and malformed private references', async () => {
+  for (const reference of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>',
+    'https://attacker.example/track', '//attacker.example/file',
+    'supabase-storage://receipts/%ZZ', 'supabase-storage://receipts/..%2Fsecret',
+    'supabase-storage://unknown/file', 'supabase-storage://avatars/a%00.png']) {
+    await assert.rejects(storage.getSignedStorageUrl(reference), /Invalid attachment reference/);
+  }
+});
+
+test('rejects empty, oversized and active-content uploads before contacting storage', async () => {
+  for (const file of [new File([], 'empty.png', {type:'image/png'}),
+    new File(['<svg onload="alert(1)"/>'], 'file.svg', {type:'image/svg+xml'}),
+    new File(['<script>alert(1)</script>'], 'file.html', {type:'text/html'}),
+    new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'large.png', {type:'image/png'})]) {
+    await assert.rejects(storage.uploadPrivateFile('avatars', 'user/file.png', file));
+  }
+  assert.equal(globalThis.__splitmateStorageTestState.uploads, 0);
+});

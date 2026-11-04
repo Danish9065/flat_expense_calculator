@@ -7,7 +7,7 @@ import { useToast } from '../context/ToastContext';
 import imageCompression from 'browser-image-compression';
 import { dbQuery } from '../lib/db';
 import { CATEGORIES } from '../constants/categories';
-import { safeStorageFileName, uploadPrivateFile } from '../lib/storage';
+import { safeStorageFileName, uploadPrivateFile, validateUpload } from '../lib/storage';
 import { distributeExpenseAmount } from '../lib/settlementCalculation';
 
 interface ExpenseModalProps {
@@ -63,7 +63,7 @@ function removeExpenseDraft(key: string) {
 
 export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense, onSuccess }: ExpenseModalProps) {
     const { user } = useAuth();
-    const { members } = useGroup();
+    const { members, formerMembers } = useGroup();
     const { success, error: showError } = useToast();
 
     const [amount, setAmount] = useState('');
@@ -79,6 +79,12 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     const [initializedDraftKey, setInitializedDraftKey] = useState('');
     const initializedDraftKeyRef = useRef('');
     const splitTouchedRef = useRef(false);
+    const activeIds = new Set((members as { user_id: string }[]).map((member) => member.user_id));
+    const originalSplits = (editingExpense?.expense_splits || []) as { user_id: string }[];
+    const financialFrozen = Boolean(editingExpense && (
+        !activeIds.has(editingExpense.added_by) || originalSplits.some((split) => !activeIds.has(split.user_id))
+        || splitBetween.some((id) => !activeIds.has(id))
+    ));
     const draftKey = user ? `splitmate:expense-draft:${user.id}:${groupId}:${editingExpense?.id || 'new'}` : '';
 
     useEffect(() => {
@@ -187,11 +193,12 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
 
             // 1. Upload receipt if any
             if (receiptFile) {
+                validateUpload(receiptFile);
                 // Compress image before upload
                 const options = {
                     maxSizeMB: 0.15,
                     maxWidthOrHeight: 1280,
-                    useWebWorker: true
+                    useWebWorker: false
                 };
 
                 try {
@@ -221,7 +228,13 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
             };
 
             if (editingExpense) {
-                await ExpenseService.editExpense(editingExpense.id, expenseData);
+                if (financialFrozen) {
+                    const { amount: _amount, splitBetween: _splits, ...metadata } = expenseData;
+                    void _amount; void _splits;
+                    await ExpenseService.editExpense(editingExpense.id, metadata);
+                } else {
+                    await ExpenseService.editExpense(editingExpense.id, expenseData);
+                }
                 success('Expense updated');
             } else {
                 await ExpenseService.addExpense(expenseData);
@@ -243,6 +256,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
     };
 
     const toggleSplitMember = (userId: string) => {
+        if (financialFrozen) return;
         splitTouchedRef.current = true;
         if (splitBetween.includes(userId)) {
             if (splitBetween.length > 1) { // Prevent empty split
@@ -290,6 +304,7 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                                     autoFocus
                                     required
                                     type="number"
+                                    disabled={financialFrozen}
                                     step="0.01"
                                     min="0.01"
                                     value={amount}
@@ -407,20 +422,23 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
                         {/* Split Selection */}
                         <div className="py-5">
                             <label className="app-label mb-2 block">Split With</label>
+                            {financialFrozen ? <p className="mb-3 text-sm text-amber-200">This expense includes a former member. Its amount and shares are read-only; you can still update its description and receipt.</p> : null}
+                            {financialFrozen ? (formerMembers as { user_id: string; full_name: string }[]).filter((member) => splitBetween.includes(member.user_id) && !activeIds.has(member.user_id)).map((member) => <p key={member.user_id} className="mb-2 text-sm text-muted-foreground">{member.full_name} (Former member) · saved share</p>) : null}
                             <div className="bg-white/[0.03] rounded-xl border border-white/10 divide-y divide-[#1E1E1E]">
                                 {members.map((member: { user_id: string; users: { full_name?: string } }) => (
                                     <label key={member.user_id} className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.04] transition-colors">
                                         <div className="flex items-center">
                                             <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold mr-3 shadow-inner">
-                                                {member.users.full_name?.charAt(0).toUpperCase()}
+                                                {member.users?.full_name?.charAt(0).toUpperCase()}
                                             </div>
                                             <span className="text-sm font-medium text-white">
-                                                {member.user_id === user?.id ? 'You' : member.users.full_name}
+                                                {member.user_id === user?.id ? 'You' : member.users?.full_name}
                                             </span>
                                         </div>
                                         <div className="relative flex items-center">
                                             <input
                                                 type="checkbox"
+                                                disabled={financialFrozen}
                                                 checked={splitBetween.includes(member.user_id)}
                                                 onChange={() => toggleSplitMember(member.user_id)}
                                                 className="w-5 h-5 text-primary bg-white/10 border-white/20 rounded focus:ring-primary focus:ring-2"
@@ -433,8 +451,8 @@ export default function ExpenseModal({ isOpen, onClose, groupId, editingExpense,
 
                         {/* Live Preview */}
                         <div className="bg-primary/10 p-3 rounded-xl border border-primary/20 flex items-center justify-between mt-5">
-                            <span className="text-sm text-primary font-medium">Split equally among {splitBetween.length} members</span>
-                            <span className="font-bold text-primary">{splitPreviewLabel}</span>
+                            <span className="text-sm text-primary font-medium">{financialFrozen ? 'Saved allocation' : `Split equally among ${splitBetween.length} members`}</span>
+                            <span className="font-bold text-primary">{financialFrozen ? 'Read-only' : splitPreviewLabel}</span>
                         </div>
 
                     </form>

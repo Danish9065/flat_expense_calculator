@@ -1,5 +1,4 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
-import { dbQuery } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
@@ -57,6 +56,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
     const [chartData, setChartData] = useState<ChartDatum[]>([]);
     const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>({});
     const [settlements, setSettlements] = useState<SettlementRow[]>([]);
+    const [historicalPayments, setHistoricalPayments] = useState<SettlementRow[]>([]);
     const [minimizedSettlements, setMinimizedSettlements] = useState<SettlementRow[]>([]);
     const [fallbackUsers, setFallbackUsers] = useState<Record<string, { full_name?: string }>>({});
     const membersRef = useRef<GroupMemberRow[]>(members);
@@ -88,23 +88,8 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             const calcSettlements = report.directPayments;
             const minimized = report.suggestedPayments;
 
-            // 3. Fallback users for removed members
-            const missingIds = new Set<string>();
-            Object.keys(userTotals).forEach(id => {
-                if (!currentMembers.find(m => m.user_id === id)) missingIds.add(id);
-            });
-            calcSettlements.forEach(s => {
-                if (!currentMembers.find(m => m.user_id === s.from)) missingIds.add(s.from);
-                if (!currentMembers.find(m => m.user_id === s.to)) missingIds.add(s.to);
-            });
-
             const fMap: Record<string, { full_name?: string }> = {};
-            if (missingIds.size > 0) {
-                const idsArray = Array.from(missingIds);
-                const missingUsersData = await dbQuery('users', `id=in.(${idsArray.join(',')})&select=id,full_name`);
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (missingUsersData as any[])?.forEach(u => fMap[u.id] = u);
-            }
+            for (const member of report.formerMembers) fMap[member.user_id] = { full_name: member.full_name };
 
             const allIds = Array.from(new Set([...currentMembers.map(m => m.user_id), ...Object.keys(userTotals)]));
             const cData = allIds.map((id, index) => {
@@ -130,6 +115,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             setCategoryTotals(catTotals);
             setSettlements(calcSettlements);
             setMinimizedSettlements(minimized);
+            setHistoricalPayments(report.historicalPayments);
 
         } catch (err) {
             if (requestId !== requestIdRef.current) return;
@@ -138,6 +124,7 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             setCategoryTotals({});
             setSettlements([]);
             setMinimizedSettlements([]);
+            setHistoricalPayments([]);
             setCalculationError(err instanceof Error ? err.message : 'Could not calculate this group balance');
         } finally {
             if (requestId === requestIdRef.current) {
@@ -430,8 +417,8 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
             {minimizedSettlements.length === 0 ? (
                 <div className="text-center py-12 app-panel border-dashed mb-6">
                     {calculationError ? <FileSearch className="w-12 h-12 text-amber-300 mx-auto mb-2 opacity-80" /> : <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2 opacity-80" />}
-                    <p className="text-muted-foreground font-medium">{calculationError ? 'Calculation unavailable' : 'All settled up!'}</p>
-                    <p className="text-sm text-white/35 mt-1">{calculationError || 'No pending balances in the group.'}</p>
+                    <p className="text-muted-foreground font-medium">{calculationError ? 'Calculation unavailable' : historicalPayments.length ? 'No active payments due' : 'All settled up!'}</p>
+                    <p className="text-sm text-white/35 mt-1">{calculationError || (historicalPayments.length ? 'Only read-only former member balances remain.' : 'No pending balances in the group.')}</p>
                 </div>
             ) : (
                 <div className="space-y-3 mb-8">
@@ -518,6 +505,16 @@ export default function Balance({ embedded = false }: { embedded?: boolean }) {
                     })}
                 </div>
             )}
+
+            {historicalPayments.length > 0 && !calculationError ? (
+                <section className="app-panel mb-8 p-5" aria-label="Former member balances">
+                    <h2 className="text-lg font-bold text-white">Former member balances</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">Saved from past expenses and payments. These balances are read-only; no new payments or charges can be recorded for former members.</p>
+                    <div className="mt-4 space-y-3">{historicalPayments.map((row) => (
+                        <p key={`${row.from}:${row.to}`} className="text-sm text-white">{getMemberName(row.from)} owes {getMemberName(row.to)} <strong>₹{row.amount.toFixed(2)}</strong></p>
+                    ))}</div>
+                </section>
+            ) : null}
 
             {/* ── SECTION 2: Full Balance Breakdown (existing — DO NOT modify) ── */}
             <div className="mb-4">

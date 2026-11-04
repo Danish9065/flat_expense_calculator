@@ -53,11 +53,12 @@ interface ExpenseCardProps {
     onEdit: () => void;
     onDelete: () => void;
     isOwner: boolean;
+    financialFrozen: boolean;
 }
 
 export default function Dashboard() {
     const { user } = useAuth();
-    const { currentGroup, members, groupId, loading: groupLoading, error: groupError, refreshGroup } = useGroup();
+    const { currentGroup, members, formerMembers, groupId, loading: groupLoading, error: groupError, refreshGroup } = useGroup();
     const { success, error: showError } = useToast();
 
     const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
@@ -140,11 +141,10 @@ export default function Dashboard() {
             // Target the specific expense to see if it has a receipt
             const deletingExpense = expenses.find((e) => e.id === expenseToDelete);
 
-            if (deletingExpense?.receipt_url) {
-                await deleteStorageReference(deletingExpense.receipt_url);
-            }
-
             await dbDelete('expenses', `id=eq.${expenseToDelete}`);
+            if (deletingExpense?.receipt_url) {
+                await deleteStorageReference(deletingExpense.receipt_url).catch((error) => console.warn('Receipt cleanup failed', error));
+            }
             success('Expense deleted');
             await fetchInitialData(true);
             if (groupId) void notifyGroupDataChanged(groupId);
@@ -158,6 +158,8 @@ export default function Dashboard() {
     const getMemberName = (id: string, fallbackName?: string) => {
         const m = (members as GroupMemberRow[]).find((mem) => mem.user_id === id);
         if (m?.users?.full_name) return m.users.full_name;
+        const former = (formerMembers as { user_id: string; full_name: string }[]).find((member) => member.user_id === id);
+        if (former) return `${former.full_name} (Former member)`;
         if (fallbackName) return `${fallbackName} (Removed)`;
         return 'Unknown User (Removed)';
     };
@@ -306,6 +308,7 @@ export default function Dashboard() {
                             onEdit={() => { setEditingExpense(expense); setModalOpen(true); }}
                             onDelete={() => setExpenseToDelete(expense.id)}
                             isOwner={user?.id === expense.added_by}
+                            financialFrozen={(expense.expense_splits || []).some((split) => !members.some((member: GroupMemberRow) => member.user_id === split.user_id))}
                         />
                     ))}
                 </div>
@@ -348,7 +351,7 @@ export default function Dashboard() {
 }
 
 // Internal component for Expense Item
-function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner }: ExpenseCardProps) {
+function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner, financialFrozen }: ExpenseCardProps) {
     const parsedDate = expense.created_at ? new Date(expense.created_at) : new Date();
     const [expanded, setExpanded] = useState(false);
 
@@ -415,7 +418,7 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                                 <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="flex items-center text-xs font-medium text-white/80 hover:text-white">
                                     <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
                                 </button>
-                                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center text-xs font-medium text-primary hover:text-primary/80">
+                                <button disabled={financialFrozen} title={financialFrozen ? 'Former member financial history is read-only' : 'Delete expense'} onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center text-xs font-medium text-primary hover:text-primary/80">
                                     <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
                                 </button>
                             </div>

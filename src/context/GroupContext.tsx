@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { dbQuery } from '../lib/db';
 import { GROUP_DATA_CHANGED_EVENT, PROFILE_CHANGED_EVENT } from '../lib/appEvents';
 import { useAuth } from './AuthContext';
@@ -20,6 +20,8 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(() => localStorage.getItem('activeGroupId'));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [members, setMembers] = useState<any[]>([]);
+  const [formerMembers, setFormerMembers] = useState<{ user_id: string; full_name: string }[]>([]);
+  const memberRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +34,9 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       const memberships = await dbQuery('group_members', `user_id=eq.${user.id}&select=group_id`);
       if (!memberships || memberships.length === 0) {
         setGroups([]);
+        setMembers([]);
+        setFormerMembers([]);
+        memberRequestRef.current += 1;
         setActiveGroupId(null);
         localStorage.removeItem('activeGroupId');
         return;
@@ -57,7 +62,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (currentActiveId) {
-        fetchMembers(currentActiveId);
+        await fetchMembers(currentActiveId);
       }
     } catch (e) {
       console.error('Failed fetching groups', e);
@@ -76,20 +81,25 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   };
 
   const fetchMembers = async (gId: string) => {
+    const requestId = ++memberRequestRef.current;
     try {
       const memberRows = await dbQuery('group_members', `group_id=eq.${gId}&select=user_id`);
-      if (!memberRows?.length) return;
+      if (!memberRows) throw new Error('Could not load members');
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const userIds = memberRows.map((m: any) => m.user_id);
-      const [userDetails, paymentProfiles] = await Promise.all([
-        dbQuery('users', `id=in.(${userIds.join(',')})&select=id,full_name,email,role,avatar_url`),
-        dbQuery('user_payment_profiles', `user_id=in.(${userIds.join(',')})&select=user_id,whatsapp_number,upi_id`)
+      const [userDetails, paymentProfiles, historicalRows] = await Promise.all([
+        userIds.length ? dbQuery('users', `id=in.(${userIds.join(',')})&select=id,full_name,email,role,avatar_url`) : Promise.resolve([]),
+        userIds.length ? dbQuery('user_payment_profiles', `user_id=in.(${userIds.join(',')})&select=user_id,whatsapp_number,upi_id`)
           .catch((error) => {
             console.error('Payment profiles are unavailable; run the payment profile migration', error);
             return [];
-          }),
+          }) : Promise.resolve([]),
+        dbQuery('former_group_members', `group_id=eq.${gId}&select=user_id,full_name`),
       ]);
+      if (requestId !== memberRequestRef.current) return;
+      const historical = (historicalRows || []) as { user_id: string; full_name: string }[];
+      setFormerMembers((current) => JSON.stringify(current) === JSON.stringify(historical) ? current : historical);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const usersById = new Map((userDetails || []).map((profile: any) => [profile.id, profile]));
@@ -116,6 +126,8 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     if (!user) {
       setGroups([]);
       setMembers([]);
+      setFormerMembers([]);
+      memberRequestRef.current += 1;
       setActiveGroupId(null);
       setLoading(false);
       return;
@@ -157,6 +169,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       groups,
       switchGroup,
       members,
+      formerMembers,
       loading,
       error,
       fetchMembers,

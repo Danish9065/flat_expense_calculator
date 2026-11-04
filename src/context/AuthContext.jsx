@@ -12,24 +12,11 @@ async function provisionProfileFromMetadata(authUser) {
   const metadata = authUser.user_metadata || {};
   if (!metadata.full_name) return null;
 
-  if (metadata.invite_key) {
-    const { error } = await supabaseClient.rpc('consume_invite_key', {
-      key_code_param: metadata.invite_key,
-      target_user_id: authUser.id,
-    });
-    if (error) throw error;
-  }
-
+  // The database validates and consumes the invitation in the same transaction
+  // as profile creation. Browser metadata never authorizes access by itself.
   const { data: profile, error: profileError } = await supabaseClient
-    .from('users')
-    .upsert({
-      id: authUser.id,
-      email: authUser.email,
-      full_name: metadata.full_name,
-      role: 'member',
-    }, { onConflict: 'id', ignoreDuplicates: true })
-    .select('role,full_name,avatar_url,currency')
-    .maybeSingle();
+    .rpc('provision_invited_profile')
+    .single();
 
   if (profileError) throw profileError;
 
@@ -98,8 +85,9 @@ export function AuthProvider({ children }) {
       } catch (error) {
         console.error('Failed to load the authenticated profile', error);
         if (active) {
-          setUser(session.user);
-          setRole('member');
+          clearPersistentSession();
+          setUser(null);
+          setRole(null);
         }
       }
     };

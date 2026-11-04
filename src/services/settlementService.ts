@@ -50,6 +50,8 @@ export interface CalculationExplanation {
     memberRows: MemberCalculationRow[];
     issues: string[];
     directPayments: { from: string; to: string; amount: number }[];
+    historicalPayments: { from: string; to: string; amount: number }[];
+    formerMembers: { user_id: string; full_name: string }[];
     suggestedPayments: { from: string; to: string; amount: number }[];
     totals: {
         expenses: number;
@@ -219,7 +221,7 @@ export const SettlementService = {
      */
     async getCalculationExplanation(groupId: string, categoryFilter = 'All'): Promise<CalculationExplanation> {
         // Stable ordering + exact counts avoid silently truncating large groups.
-        const [expenses, splits, priorPayments] = await Promise.all([
+        const [expenses, splits, priorPayments, activeMembers, formerMembers] = await Promise.all([
             readAllPages<ExplanationExpenseRow>((from, to) => {
                 let query = supabaseClient.from('expenses')
                     .select('id,item_name,category,created_at,added_by,amount', { count: 'exact' })
@@ -239,12 +241,17 @@ export const SettlementService = {
                     .select('paid_by,paid_to,amount,settled_at,is_partial', { count: 'exact' })
                     .eq('group_id', groupId).order('id').range(from, to))
                 : Promise.resolve([]),
+            readAllPages<GroupMemberRow>((from, to) => supabaseClient.from('group_members')
+                .select('user_id', { count: 'exact' }).eq('group_id', groupId).order('user_id').range(from, to)),
+            readAllPages<{ user_id: string; full_name: string }>((from, to) => supabaseClient.from('former_group_members')
+                .select('user_id,full_name', { count: 'exact' }).eq('group_id', groupId).order('user_id').range(from, to)),
         ]);
+        if (!activeMembers || !formerMembers) throw new Error('Could not verify group membership');
         const expenseIds = new Set(expenses.map((expense) => expense.id));
         if (splits.some((split) => !expenseIds.has(split.expense_id))) {
             throw new Error('The ledger changed while loading. Please refresh.');
         }
-        const calculation = calculateSettlementLedger(expenses, splits, priorPayments);
+        const calculation = calculateSettlementLedger(expenses, splits, priorPayments, (activeMembers as GroupMemberRow[]).map((member) => member.user_id));
 
         return {
             generatedAt: new Date().toISOString(),
@@ -255,6 +262,8 @@ export const SettlementService = {
             memberRows: calculation.members,
             issues: calculation.issues,
             directPayments: calculation.issues.length ? [] : calculation.directSettlements,
+            historicalPayments: calculation.historicalSettlements,
+            formerMembers: formerMembers as { user_id: string; full_name: string }[],
             suggestedPayments: calculation.settlements,
             totals: calculation.totals,
         };

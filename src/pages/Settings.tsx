@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { User, Loader2, Image as ImageIcon, Save, LogOut, MessageCircle, ShieldCheck, WalletCards, Pencil, CheckCircle2, X } from 'lucide-react';
 import { isValidUpiId, normalizeUpiId } from '../lib/paymentLinks';
-import { deleteStorageReference, safeStorageFileName, uploadPrivateFile } from '../lib/storage';
+import { deleteStorageReference, safeStorageFileName, uploadPrivateFile, validateUpload } from '../lib/storage';
 import CountryCodeSelect from '../components/CountryCodeSelect';
 import SecureStorageImage from '../components/SecureStorageImage';
 import imageCompression from 'browser-image-compression';
@@ -98,10 +98,11 @@ export default function Settings() {
             let finalAvatarUrl = avatarUrl;
 
             if (avatarFile) {
+                validateUpload(avatarFile);
                 const compressedAvatar = await imageCompression(avatarFile, {
                     maxSizeMB: 0.5,
                     maxWidthOrHeight: 1024,
-                    useWebWorker: true,
+                    useWebWorker: false,
                 });
                 const objectPath = `${user.id}/${crypto.randomUUID()}-${safeStorageFileName(compressedAvatar.name || avatarFile.name)}`;
                 uploadedAvatarReference = await uploadPrivateFile('avatars', objectPath, compressedAvatar);
