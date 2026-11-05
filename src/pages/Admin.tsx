@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { dbQuery, dbDelete, supabaseClient } from '../lib/db';
+import { dbQuery, supabaseClient } from '../lib/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useGroup } from '../context/GroupContext';
@@ -8,6 +8,7 @@ import { Key, Shield, RefreshCw, CheckCircle2, Clock, Trash2, Users, AlertTriang
 import { format } from 'date-fns';
 import ConfirmModal from '../components/ConfirmModal';
 import { notifyGroupDataChanged } from '../hooks/useRealtimeSync';
+import { ExpenseService } from '../services/expenseService';
 import { SettlementService } from '../services/settlementService';
 
 interface InviteKeyRow {
@@ -29,7 +30,7 @@ interface AdminUserRow {
 
 export default function Admin() {
     const { user, role } = useAuth();
-    const { groupId, refreshGroup, members } = useGroup();
+    const { groupId, currentGroup, refreshGroup, members } = useGroup();
     const { success, error: showError } = useToast();
 
     const [keys, setKeys] = useState<InviteKeyRow[]>([]);
@@ -37,21 +38,22 @@ export default function Admin() {
     const [generating, setGenerating] = useState(false);
     const [assignToName, setAssignToName] = useState(''); // Added state for assigned_to text input
     const [users, setUsers] = useState<AdminUserRow[]>([]);
-    const [userToDelete, setUserToDelete] = useState<AdminUserRow | null>(null);
     const [userToRemove, setUserToRemove] = useState<AdminUserRow | null>(null);
+    const [removalGroupId, setRemovalGroupId] = useState<string | null>(null);
     const [removeWarning, setRemoveWarning] = useState<string>('');
     const [removingMember, setRemovingMember] = useState(false);
-    const [showDeleteAllExpenses, setShowDeleteAllExpenses] = useState(false);
+    const [resetTarget, setResetTarget] = useState<{ id: string; name: string } | null>(null);
     const [deletingExpenses, setDeletingExpenses] = useState(false);
 
     const handleDeleteAllExpenses = async () => {
-        if (!groupId) return;
+        if (!resetTarget || deletingExpenses) return;
+        const targetGroupId = resetTarget.id;
         setDeletingExpenses(true);
         try {
-            await dbDelete('expenses', `group_id=eq.${groupId}`);
-            await dbDelete('settlements', `group_id=eq.${groupId}`);
+            await ExpenseService.resetGroupExpenses(targetGroupId);
+            void notifyGroupDataChanged(targetGroupId).catch(console.warn);
             success('All expenses and settlements deleted successfully!');
-            setShowDeleteAllExpenses(false);
+            setResetTarget(null);
         } catch (err: unknown) {
             showError(err instanceof Error ? err.message : 'Failed to delete expenses');
         } finally {
@@ -114,29 +116,6 @@ export default function Admin() {
         }
     };
 
-    const handleDeleteUser = async () => {
-        if (!userToDelete) return;
-        try {
-            // Database is heavily configured with ON DELETE CASCADE / SET NULL
-            // Simply deleting the user will securely auto-wipe all associated splits and settlements
-            await dbDelete('users', `id=eq.${userToDelete.id}`);
-
-            success(`${userToDelete.full_name} deleted successfully`);
-            setUserToDelete(null);
-            fetchUsers();
-            
-            // Refresh group context and notify other clients so the user is instantly removed from UI
-            if (refreshGroup) {
-                await refreshGroup();
-            }
-            if (groupId) {
-                await notifyGroupDataChanged(groupId);
-            }
-        } catch (err: unknown) {
-            showError(err instanceof Error ? err.message : 'Failed to delete user');
-        }
-    };
-
     const checkAndPromptRemove = async (u: AdminUserRow) => {
         try {
             const report = await SettlementService.getCalculationExplanation(groupId || '');
@@ -144,6 +123,7 @@ export default function Admin() {
             const balance = report.memberRows.find((row) => row.userId === u.id)?.netBalance ?? 0;
             const obligation = balance < 0 ? `still owes ₹${(-balance).toFixed(2)}` : balance > 0 ? `is still owed ₹${balance.toFixed(2)}` : 'has no net amount due';
             setRemoveWarning(`${u.full_name} ${obligation}. Removing them preserves their name, expenses, shares and payment history. They will lose group access, and their remaining balance becomes read-only. No new charges or payments can involve them. Continue?`);
+            setRemovalGroupId(groupId);
             setUserToRemove(u);
         } catch {
             showError('Failed to check balances');
@@ -152,9 +132,17 @@ export default function Admin() {
 
     const handleRemoveFromGroup = async () => {
         if (!userToRemove || !groupId || removingMember) return;
+        if (groupId !== removalGroupId) {
+            showError('The selected group changed. Review the member removal again.');
+            setUserToRemove(null);
+            return;
+        }
         setRemovingMember(true);
         try {
-            await dbDelete('group_members', `group_id=eq.${groupId}&user_id=eq.${userToRemove.id}`);
+            const { data, error } = await supabaseClient.from('group_members').delete()
+                .eq('group_id', groupId).eq('user_id', userToRemove.id).select('user_id');
+            if (error) throw new Error(error.message);
+            if (data?.length !== 1) throw new Error('Member not found or removal denied. Refresh the group and try again.');
             success(`${userToRemove.full_name} removed from the group successfully`);
             setUserToRemove(null);
             fetchUsers();
@@ -274,6 +262,7 @@ export default function Admin() {
                     <Users className="w-5 h-5 text-primary" />
                     <h2 className="text-lg font-bold text-white">Manage Users</h2>
                 </div>
+                <p className="text-sm text-muted-foreground mb-4">Remove members from the selected group while preserving their history. Account deletion is disabled to protect records across all groups.</p>
                 <div className="space-y-2">
                     {users.map(u => (
                         <div key={u.id} className="flex items-center justify-between bg-card rounded-2xl px-4 py-3 border border-white/10">
@@ -290,13 +279,6 @@ export default function Admin() {
                                         title="Remove from Group"
                                     >
                                         <UserMinus className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => setUserToDelete(u)}
-                                        className="p-2 text-primary hover:text-primary/80 hover:bg-primary/10 rounded-lg transition-colors"
-                                        title="Delete Entire Account"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
                                     </button>
                                 </div>
                             )}
@@ -316,30 +298,21 @@ export default function Admin() {
                 </div>
                 <div className="bg-primary/10 border border-primary/25 rounded-2xl p-5">
                     <div className="flex flex-col mb-4">
-                        <h3 className="font-bold text-white mb-1">Delete All Expenses</h3>
+                        <h3 className="font-bold text-white mb-1">Reset Expenses: {currentGroup?.name}</h3>
                         <p className="app-subtitle">
-                            Permanently remove all expenses, splits, and settlements for this group. This will completely reset the balances.
+                            Permanently remove all expenses, shares, and recorded settlements for the selected group, including former-member history. Balances reset to zero. Members and other groups are preserved.
                         </p>
                     </div>
                     <button
-                        onClick={() => setShowDeleteAllExpenses(true)}
+                        onClick={() => groupId && setResetTarget({ id: groupId, name: currentGroup?.name || 'Selected group' })}
                         disabled={!groupId || deletingExpenses}
                         className="danger-button w-full flex justify-center items-center py-2.5 px-4 font-bold rounded-xl transition-all shadow-sm"
                     >
                         {deletingExpenses ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5 mr-2" />}
-                        {deletingExpenses ? 'Deleting...' : 'Wipe All Group Data'}
+                        {deletingExpenses ? 'Deleting...' : 'Reset Group Expenses'}
                     </button>
                 </div>
             </div>
-
-            <ConfirmModal
-                isOpen={!!userToDelete}
-                onClose={() => setUserToDelete(null)}
-                onConfirm={handleDeleteUser}
-                title="Delete User"
-                confirmText="Delete"
-                message={`Are you sure you want to permanently delete ${userToDelete?.full_name}? This will also remove them from the group.`}
-            />
 
             <ConfirmModal
                 isOpen={!!userToRemove}
@@ -351,12 +324,13 @@ export default function Admin() {
             />
 
             <ConfirmModal
-                isOpen={showDeleteAllExpenses}
-                onClose={() => setShowDeleteAllExpenses(false)}
+                isOpen={!!resetTarget}
+                onClose={() => setResetTarget(null)}
                 onConfirm={handleDeleteAllExpenses}
-                title="Delete All Expenses"
-                confirmText="Wipe Data"
-                message="Are you absolutely sure you want to delete ALL expenses, splits, and settlements for this group? This action cannot be undone and balances will be reset to zero."
+                title={`Reset Expenses: ${resetTarget?.name || 'Selected group'}`}
+                confirmText="Reset Expenses"
+                requireWordOption="RESET"
+                message={`Permanently delete all expenses, shares, and recorded settlements in ${resetTarget?.name || 'this group'}, including former-member history? This cannot be undone. Members and other groups are preserved. Type RESET to confirm.`}
             />
         </div>
     );

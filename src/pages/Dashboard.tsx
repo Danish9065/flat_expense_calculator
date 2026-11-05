@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { dbQuery, dbDelete } from '../lib/db';
+import { dbQuery } from '../lib/db';
+import { ExpenseService } from '../services/expenseService';
 import { useAuth } from '../context/AuthContext';
 import { useGroup } from '../context/GroupContext';
 import { SettlementService } from '../services/settlementService';
@@ -12,7 +13,6 @@ import { CATEGORY_MAP } from '../constants/categories';
 import { useRealtimeSync, notifyGroupDataChanged } from '../hooks/useRealtimeSync';
 import SecureStorageLink from '../components/SecureStorageLink';
 import SecureStorageImage from '../components/SecureStorageImage';
-import { deleteStorageReference } from '../lib/storage';
 
 import { expenseMonth, monthlySummary } from '../lib/monthlySummary';
 
@@ -47,6 +47,7 @@ interface GroupMemberRow {
 }
 
 interface ExpenseCardProps {
+    isAdmin: boolean;
     expense: ExpenseRow;
     memberName: string;
     splitNames: string;
@@ -57,7 +58,7 @@ interface ExpenseCardProps {
 }
 
 export default function Dashboard() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const { currentGroup, members, formerMembers, groupId, loading: groupLoading, error: groupError, refreshGroup } = useGroup();
     const { success, error: showError } = useToast();
 
@@ -136,20 +137,15 @@ export default function Dashboard() {
     const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
     const handleDelete = async () => {
-        if (!expenseToDelete) return;
+        if (!expenseToDelete || !groupId) return;
         try {
-            // Target the specific expense to see if it has a receipt
-            const deletingExpense = expenses.find((e) => e.id === expenseToDelete);
-
-            await dbDelete('expenses', `id=eq.${expenseToDelete}`);
-            if (deletingExpense?.receipt_url) {
-                await deleteStorageReference(deletingExpense.receipt_url).catch((error) => console.warn('Receipt cleanup failed', error));
-            }
+            await ExpenseService.deleteExpense(groupId, expenseToDelete);
+            // Keep private receipt files: another expense may reference the same object.
             success('Expense deleted');
             await fetchInitialData(true);
             if (groupId) void notifyGroupDataChanged(groupId);
-        } catch {
-            showError('Failed to delete expense');
+        } catch (err) {
+            showError(err instanceof Error ? err.message : 'Failed to delete expense');
         } finally {
             setExpenseToDelete(null);
         }
@@ -303,12 +299,13 @@ export default function Dashboard() {
                         <ExpenseCard
                             key={expense.id}
                             expense={expense}
+                            isAdmin={role === 'admin'}
                             memberName={getMemberName(expense.added_by, expense.users?.full_name)}
                             splitNames={resolveSplitNames(expense)}
                             onEdit={() => { setEditingExpense(expense); setModalOpen(true); }}
                             onDelete={() => setExpenseToDelete(expense.id)}
-                            isOwner={user?.id === expense.added_by}
-                            financialFrozen={(expense.expense_splits || []).some((split) => !members.some((member: GroupMemberRow) => member.user_id === split.user_id))}
+                            isOwner={role === 'admin' || user?.id === expense.added_by}
+                            financialFrozen={!members.some((member: GroupMemberRow) => member.user_id === expense.added_by) || (expense.expense_splits || []).some((split) => !members.some((member: GroupMemberRow) => member.user_id === split.user_id))}
                         />
                     ))}
                 </div>
@@ -343,7 +340,7 @@ export default function Dashboard() {
                 onClose={() => setExpenseToDelete(null)}
                 onConfirm={handleDelete}
                 title="Delete Expense"
-                message="Are you sure you want to permanently delete this expense? This action cannot be undone and splits will be recalculated."
+                message="Are you sure you want to permanently delete this expense? Its shares will be removed and this group’s balances recalculated. Recorded payments are preserved and may create a refund balance. Other groups are unchanged."
                 confirmText="Delete"
             />
         </div>
@@ -351,7 +348,7 @@ export default function Dashboard() {
 }
 
 // Internal component for Expense Item
-function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner, financialFrozen }: ExpenseCardProps) {
+function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwner, financialFrozen, isAdmin }: ExpenseCardProps) {
     const parsedDate = expense.created_at ? new Date(expense.created_at) : new Date();
     const [expanded, setExpanded] = useState(false);
 
@@ -418,7 +415,7 @@ function ExpenseCard({ expense, memberName, splitNames, onEdit, onDelete, isOwne
                                 <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="flex items-center text-xs font-medium text-white/80 hover:text-white">
                                     <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
                                 </button>
-                                <button disabled={financialFrozen} title={financialFrozen ? 'Former member financial history is read-only' : 'Delete expense'} onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center text-xs font-medium text-primary hover:text-primary/80">
+                                <button disabled={financialFrozen && !isAdmin} title={financialFrozen && !isAdmin ? 'Former member financial history is read-only' : 'Delete expense'} onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center text-xs font-medium text-primary hover:text-primary/80">
                                     <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
                                 </button>
                             </div>

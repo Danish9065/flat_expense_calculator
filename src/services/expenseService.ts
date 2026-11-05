@@ -44,6 +44,18 @@ export const ExpenseService = {
     },
 
 
+    async deleteExpense(groupId: string, expenseId: string) {
+        const { error } = await supabaseClient.rpc('delete_group_expense', {
+            p_group_id: groupId, p_expense_id: expenseId,
+        });
+        if (error) throw new Error(error.message || 'Failed to delete expense');
+    },
+
+    async resetGroupExpenses(groupId: string) {
+        const { error } = await supabaseClient.rpc('reset_group_expenses', { p_group_id: groupId });
+        if (error) throw new Error(error.message || 'Failed to reset group expenses');
+    },
+
     async addExpense(expenseData: ExpenseData) {
         return saveExpense(expenseData, null);
     },

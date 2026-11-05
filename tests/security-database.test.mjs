@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { readFile, readdir } from 'node:fs/promises';
+import { build } from 'esbuild';
 import { PGlite } from '@electric-sql/pglite';
 
 // Real PostgreSQL RLS/ACL execution, with minimal Supabase infrastructure mocks.
 // Never connects to production. Each test rolls its changes back.
-let db;
+let db, calculateLedger;
 const owner = '11111111-1111-4111-8111-111111111111';
 const member = '22222222-2222-4222-8222-222222222222';
 const outsider = '33333333-3333-4333-8333-333333333333';
@@ -15,6 +16,8 @@ const group = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const expense = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 before(async () => {
+  const compiled = await build({ entryPoints:['src/lib/settlementCalculation.ts'], bundle:true, write:false, format:'esm', platform:'node' });
+  calculateLedger = (await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`)).calculateSettlementLedger;
   db = new PGlite();
   await db.exec(`
     create role anon; create role authenticated;
@@ -364,5 +367,147 @@ test('new RPC is unavailable to anonymous users and former members cannot receiv
     await db.query('delete from group_members where user_id=$1',[member]);
     await db.query("select set_config('request.jwt.claim.sub',$1,true)",[member]);
     await assert.rejects(db.query('insert into settlements(group_id,paid_by,paid_to,amount) values($1,$2,$3,10)',[group,owner,member]),/active group payment receiver/i);
+  });
+});
+
+const otherGroup='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab';
+const otherExpense='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc';
+async function seedSharedGroups({former=true,payment=true}={}) {
+  await db.exec('reset role');
+  await db.query("insert into groups(id,name,invite_code,created_by) values($1,'Other shared flat','OTHERFLAT234',$2)",[otherGroup,owner]);
+  await db.query('insert into group_members(group_id,user_id) values($1,$2),($1,$3)',[otherGroup,owner,member]);
+  await db.query("insert into expenses(id,group_id,item_name,amount,added_by) values($1,$2,'Other kitchen',200,$3)",[otherExpense,otherGroup,owner]);
+  await db.query('insert into expense_splits(expense_id,user_id,amount_owed) values($1,$2,100),($1,$3,100)',[otherExpense,owner,member]);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[owner]);
+  await db.exec('set local role authenticated');
+  if(payment) {
+    for(const gid of [group,otherGroup]) await db.query('insert into settlements(group_id,paid_by,paid_to,amount) values($1,$2,$3,20)',[gid,member,owner]);
+  }
+  if(former) await db.query('delete from group_members where group_id=$1 and user_id=$2',[group,member]);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[admin]);
+}
+function calculateSnapshot(snapshot) {
+  return calculateLedger(snapshot.expenses,snapshot.splits,snapshot.payments,snapshot.members.map(m=>m.user_id));
+}
+async function financialSnapshot(gid) {
+  return {
+    expenses:(await db.query('select * from expenses where group_id=$1 order by id',[gid])).rows,
+    splits:(await db.query('select s.* from expense_splits s join expenses e on e.id=s.expense_id where e.group_id=$1 order by s.id',[gid])).rows,
+    payments:(await db.query('select * from settlements where group_id=$1 order by id',[gid])).rows,
+    members:(await db.query('select * from group_members where group_id=$1 order by user_id',[gid])).rows,
+    former:(await db.query('select * from former_group_members where group_id=$1 order by user_id',[gid])).rows,
+  };
+}
+
+test('admin reset deletes former-member expenses, shares and payments atomically in only the selected group',async()=>{
+  await asUser(admin,async()=>{
+    await seedSharedGroups();
+    const other=await financialSnapshot(otherGroup);
+    const before=await financialSnapshot(group);
+    const users=(await db.query('select * from users order by id')).rows;
+    const receipts=(await db.query('select * from storage.objects order by id')).rows;
+    await db.query('select reset_group_expenses($1)',[group]);
+    await db.exec('set constraints all immediate');
+    const result=await financialSnapshot(group);
+    assert.deepEqual(result,{expenses:[],splits:[],payments:[],members:before.members,former:before.former});
+    const calculation=calculateSnapshot(result);
+    assert.deepEqual(calculation.issues,[]);
+    assert.equal(calculation.totals.balanceChecksum,0);
+    assert.equal(calculation.totals.expenses,0);
+    assert.deepEqual(calculation.settlements,[]);
+    assert.deepEqual(calculation.historicalSettlements,[]);
+    assert.deepEqual(await financialSnapshot(otherGroup),other);
+    assert.deepEqual(calculateSnapshot(await financialSnapshot(otherGroup)),calculateSnapshot(other));
+    assert.deepEqual((await db.query('select * from users order by id')).rows,users);
+    assert.deepEqual((await db.query('select * from storage.objects order by id')).rows,receipts);
+    await db.query('select reset_group_expenses($1)',[group]); // empty/repeated reset
+    assert.deepEqual(await financialSnapshot(otherGroup),other);
+    assert.deepEqual(calculateSnapshot(await financialSnapshot(otherGroup)),calculateSnapshot(other));
+  });
+});
+
+test('reset checks database-backed admin authorization and validates group before deleting',async()=>{
+  await asUser(null,()=>denied('select reset_group_expenses($1)',[group]),'anon');
+  for(const actor of [owner,member,outsider]) await asUser(actor,()=>assert.rejects(db.query('select reset_group_expenses($1)',[group]),/Administrator access required/));
+  await asUser(admin,()=>assert.rejects(db.query('select reset_group_expenses(null)'),/Choose a group/));
+  await asUser(admin,()=>assert.rejects(db.query('select reset_group_expenses(gen_random_uuid())'),/Group not found/));
+});
+
+test('reset rolls payments and all expenses back when a later expense delete fails',async()=>{
+  await db.exec(`create function private.fail_test_delete() returns trigger language plpgsql as $$begin
+    if (select count(*) from public.expenses where group_id=old.group_id)>1 then return old; end if;
+    raise exception 'Injected delete failure'; end$$;
+    create trigger z_fail_test_delete before delete on expenses for each row execute function private.fail_test_delete();`);
+  try {
+    await asUser(admin,async()=>{
+      await seedSharedGroups();
+      await db.query("select set_config('request.jwt.claim.sub',$1,true)",[owner]);
+      await db.query('select * from save_expense($1)',[{group_id:group,added_by:owner,item_name:'Second expense',amount:10,splitBetween:[owner]}]);
+      await db.query("select set_config('request.jwt.claim.sub',$1,true)",[admin]);
+      const before=await financialSnapshot(group),other=await financialSnapshot(otherGroup);
+      await db.exec('savepoint reset_attempt');
+      await assert.rejects(db.query('select reset_group_expenses($1)',[group]),/Injected delete failure/);
+      await db.exec('rollback to savepoint reset_attempt');
+      assert.deepEqual(await financialSnapshot(group),before);
+      assert.deepEqual(await financialSnapshot(otherGroup),other);
+    assert.deepEqual(calculateSnapshot(await financialSnapshot(otherGroup)),calculateSnapshot(other));
+    });
+  } finally {await db.exec('drop trigger z_fail_test_delete on expenses; drop function private.fail_test_delete()');}
+});
+
+test('single admin deletion cascades its former shares but preserves payments and every other group',async()=>{
+  await asUser(admin,async()=>{
+    await seedSharedGroups();
+    const before=await financialSnapshot(group),other=await financialSnapshot(otherGroup);
+    await db.query('select delete_group_expense($1,$2)',[group,expense]);
+    await db.exec('set constraints all immediate');
+    const result=await financialSnapshot(group);
+    assert.deepEqual(result,{...before,expenses:[],splits:[]});
+    const calculation=calculateSnapshot(result);
+    assert.deepEqual(calculation.issues,[]);
+    assert.equal(calculation.totals.balanceChecksum,0);
+    assert.equal(calculation.members.find(m=>m.userId===owner).netBalance,-20);
+    assert.equal(calculation.members.find(m=>m.userId===member).netBalance,20);
+    assert.deepEqual(await financialSnapshot(otherGroup),other);
+    assert.deepEqual(calculateSnapshot(await financialSnapshot(otherGroup)),calculateSnapshot(other));
+  });
+});
+
+test('single delete rejects wrong group, missing expense, unauthorized callers and anonymous access',async()=>{
+  await asUser(null,()=>denied('select delete_group_expense($1,$2)',[group,expense]),'anon');
+  for(const actor of [member,outsider]) await asUser(actor,()=>assert.rejects(db.query('select delete_group_expense($1,$2)',[group,expense]),/not found or deletion denied/));
+  await asUser(admin,async()=>{
+    await seedSharedGroups();
+    const before=await financialSnapshot(group),other=await financialSnapshot(otherGroup);
+    await db.exec('savepoint wrong_group');
+    await assert.rejects(db.query('select delete_group_expense($1,$2)',[otherGroup,expense]),/not found or deletion denied/);
+    await db.exec('rollback to savepoint wrong_group');
+    assert.deepEqual(await financialSnapshot(group),before);
+    assert.deepEqual(await financialSnapshot(otherGroup),other);
+    assert.deepEqual(calculateSnapshot(await financialSnapshot(otherGroup)),calculateSnapshot(other));
+  });
+  await asUser(admin,()=>assert.rejects(db.query('select delete_group_expense(null,$1)',[expense]),/Choose an expense/));
+  await asUser(admin,()=>assert.rejects(db.query('select delete_group_expense($1,gen_random_uuid())',[group]),/not found or deletion denied/));
+});
+
+test('admin deletion permission does not unlock former amounts, shares or account deletion',async()=>{
+  for(const sql of [
+    'update expenses set amount=120 where id=$1',
+    'delete from expense_splits where expense_id=$1',
+    'update expense_splits set amount_owed=1 where expense_id=$1',
+  ]) await asUser(admin,async()=>{
+    await seedSharedGroups();
+    await assert.rejects(db.query(sql,[expense]),/read-only/);
+  });
+});
+
+test('active expense owner can delete their expense with cascading shares and preserve paid history',async()=>{
+  await asUser(owner,async()=>{
+    await db.query('insert into settlements(group_id,paid_by,paid_to,amount) values($1,$2,$3,20)',[group,member,owner]);
+    await db.query('select delete_group_expense($1,$2)',[group,expense]);
+    await db.exec('set constraints all immediate');
+    assert.equal((await db.query('select * from expenses')).rows.length,0);
+    assert.equal((await db.query('select * from expense_splits')).rows.length,0);
+    assert.equal((await db.query('select * from settlements')).rows.length,1);
   });
 });

@@ -37,7 +37,7 @@ async function legacyDatabase(){
     create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,owner_id text);
     alter table storage.objects enable row level security;
     create function storage.foldername(text) returns text[] language sql immutable as $$select string_to_array($1,'/')$$;`);
-  for(const name of (await readdir('supabase/migrations')).filter(f=>f.endsWith('.sql')&&f!==migration).sort()){
+  for(const name of (await readdir('supabase/migrations')).filter(f=>f.endsWith('.sql')&&f<migration).sort()){
     await db.exec((await readFile(`supabase/migrations/${name}`,'utf8')).replace(/alter publication supabase_realtime add table[\s\S]*?;/gi,''));
   }
   for(const [,uid] of original){
